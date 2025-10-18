@@ -1,0 +1,33 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-vcs-permalinks
+  - repo: https://github.com/tobinjt/rust-pre-commit-checks
+    rev: v1.0.0
+    hooks:
+      - id: cargo-check
+      - id: cargo-clippy
+      - id: cargo-fmt
+      - id: cargo-llvm-cov
+        args:
+          [
+            "--fail-uncovered-lines=5",
+            "--fail-uncovered-functions=1",
+            "--quiet",
+            "--show-missing-lines",
+          ]
+      - id: cargo-test
+  - repo: meta
+    hooks:
+      - id: check-hooks-apply
+      - id: check-useless-excludes
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.3.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [--verbose]
