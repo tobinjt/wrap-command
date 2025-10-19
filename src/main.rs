@@ -22,11 +22,30 @@ struct Args {
     command: Vec<String>,
 }
 
-fn main() {
-    let args = Args::parse();
-
+fn realmain(args: Args) {
     println!("tmux_window_name: {:?}", args.tmux_window_name);
     println!("lockfile: {:?}", args.lockfile);
     println!("timeout: {:?}", args.timeout);
     println!("command: {:?}", args.command);
+}
+
+fn main() {
+    realmain(Args::parse());
+}
+
+#[cfg(test)]
+mod realmain {
+    use super::*;
+
+    #[test]
+    fn not_really_a_test() {
+        realmain(Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name=foo",
+            "--lockfile=bar",
+            "--timeout=100",
+            "echo",
+            "foo",
+        ]));
+    }
 }

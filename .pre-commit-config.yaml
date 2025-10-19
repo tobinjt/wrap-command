@@ -12,15 +12,14 @@ repos:
       - id: cargo-check
       - id: cargo-clippy
       - id: cargo-fmt
-      # TODO: re-enable coverage check.
-      # - id: cargo-llvm-cov
-      #   args:
-      #     [
-      #       "--fail-uncovered-lines=5",
-      #       "--fail-uncovered-functions=1",
-      #       "--quiet",
-      #       "--show-missing-lines",
-      #     ]
+      - id: cargo-llvm-cov
+        args:
+          [
+            "--fail-uncovered-lines=5",
+            "--fail-uncovered-functions=1",
+            "--quiet",
+            "--show-missing-lines",
+          ]
       - id: cargo-test
   - repo: meta
     hooks:
