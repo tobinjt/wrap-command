@@ -13,9 +13,13 @@ struct Args {
     #[arg(long = "lockfile")]
     lockfile: Option<String>,
 
-    /// The timeout in seconds.
-    #[arg(long = "timeout")]
-    timeout: Option<u64>,
+    /// The lock_timeout in seconds.
+    #[arg(long = "lock_timeout")]
+    lock_timeout: Option<u64>,
+
+    /// The command_timeout in seconds.
+    #[arg(long = "command_timeout")]
+    command_timeout: Option<u64>,
 
     /// The command to run.
     #[arg(trailing_var_arg = true, required = true)]
@@ -25,7 +29,8 @@ struct Args {
 fn realmain(args: Args) {
     println!("tmux_window_name: {:?}", args.tmux_window_name);
     println!("lockfile: {:?}", args.lockfile);
-    println!("timeout: {:?}", args.timeout);
+    println!("lock_timeout: {:?}", args.lock_timeout);
+    println!("command_timeout: {:?}", args.command_timeout);
     println!("command: {:?}", args.command);
 }
 
@@ -43,7 +48,8 @@ mod realmain {
             "argv0",
             "--tmux_window_name=foo",
             "--lockfile=bar",
-            "--timeout=100",
+            "--lock_timeout=100",
+            "--command_timeout=100",
             "echo",
             "foo",
         ]));
