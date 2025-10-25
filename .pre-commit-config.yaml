@@ -15,8 +15,8 @@ repos:
       - id: cargo-llvm-cov
         args:
           [
-            "--fail-uncovered-lines=5",
-            "--fail-uncovered-functions=1",
+            "--fail-uncovered-lines=6",
+            "--fail-uncovered-functions=2",
             "--quiet",
             "--show-missing-lines",
           ]
