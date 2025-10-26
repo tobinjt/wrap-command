@@ -1,8 +1,13 @@
 use clap::Parser;
 use fs4::fs_std::FileExt;
+use nix::sys::signal::{Signal, killpg};
+use nix::unistd::Pid;
 use std::fs::File;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
+use std::process::Command;
 use std::time::{Duration, Instant};
+use wait_timeout::ChildExt;
 
 /// A program that wraps a command, and ensures that only one instance of the
 /// command is running at a time.
@@ -28,6 +33,9 @@ struct Args {
     /// The command to run.
     #[arg(trailing_var_arg = true, required = true)]
     command: Vec<String>,
+    // TODO: add current_dir
+    // https://doc.rust-lang.org/std/process/struct.Command.html#method.current_dir
+    // TODO: add support for shell?
 }
 
 #[allow(dead_code)]
@@ -52,6 +60,35 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
             }
         }
     }
+}
+
+#[allow(dead_code)]
+fn run_command(command: &[String], timeout: Option<Duration>) -> Result<i32, String> {
+    let mut child_command = Command::new(&command[0]);
+    child_command.args(&command[1..]);
+    child_command.process_group(0);
+
+    // TODO: record the child pgid somewhere and kill it on receipt of SIGINT.
+    let mut child = child_command.spawn().map_err(|e| e.to_string())?;
+
+    let exit_status = match timeout {
+        Some(duration) => match child.wait_timeout(duration).map_err(|e| e.to_string())? {
+            Some(status) => Ok(status),
+            None => {
+                let pgid = Pid::from_raw(child.id() as i32);
+                // TODO: send SIGINT first to give time for a graceful exit, then send SIGKILL
+                // after 1 second.
+                killpg(pgid, Signal::SIGKILL).map_err(|e| e.to_string())?;
+                child.wait().map_err(|e| e.to_string())?;
+                Err(format!("Command timed out after {duration:?}"))
+            }
+        },
+        None => child.wait().map_err(|e| e.to_string()),
+    }?;
+
+    exit_status
+        .code()
+        .ok_or_else(|| "Command terminated by signal".to_string())
 }
 
 fn realmain(args: Args) {
@@ -81,6 +118,40 @@ mod realmain {
             "echo",
             "foo",
         ]));
+    }
+}
+
+#[cfg(test)]
+mod run_command {
+    use super::*;
+
+    #[test]
+    fn test_run_command_success() {
+        let command = vec!["echo".to_string(), "foo".to_string()];
+        let result = run_command(&command, None);
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_run_command_timeout() {
+        let command = vec!["sleep".to_string(), "2".to_string()];
+        let result = run_command(&command, Some(Duration::from_secs(1)));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Command timed out after 1s");
+    }
+
+    #[test]
+    fn test_run_command_success_with_timeout() {
+        let command = vec!["sleep".to_string(), "1".to_string()];
+        let result = run_command(&command, Some(Duration::from_secs(2)));
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_run_command_fail() {
+        let command = vec!["false".to_string()];
+        let result = run_command(&command, None);
+        assert_eq!(result.unwrap(), 1);
     }
 }
 
