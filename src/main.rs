@@ -30,11 +30,13 @@ struct Args {
     #[arg(long = "command_timeout")]
     command_timeout: Option<u64>,
 
+    /// The directory to run the command in.
+    #[arg(long = "directory")]
+    directory: Option<String>,
+
     /// The command to run.
     #[arg(trailing_var_arg = true, required = true)]
     command: Vec<String>,
-    // TODO: add current_dir
-    // https://doc.rust-lang.org/std/process/struct.Command.html#method.current_dir
     // TODO: add support for shell?
 }
 
@@ -63,9 +65,16 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
 }
 
 #[allow(dead_code)]
-fn run_command(command: &[String], timeout: Option<Duration>) -> Result<i32, String> {
+fn run_command(
+    command: &[String],
+    timeout: Option<Duration>,
+    directory: Option<&String>,
+) -> Result<i32, String> {
     let mut child_command = Command::new(&command[0]);
     child_command.args(&command[1..]);
+    if let Some(dir) = directory {
+        child_command.current_dir(dir);
+    }
     child_command.process_group(0);
 
     // TODO: record the child pgid somewhere and kill it on receipt of SIGINT.
@@ -96,6 +105,7 @@ fn realmain(args: Args) {
     println!("lockfile: {:?}", args.lockfile);
     println!("lock_timeout: {:?}", args.lock_timeout);
     println!("command_timeout: {:?}", args.command_timeout);
+    println!("directory: {:?}", args.directory);
     println!("command: {:?}", args.command);
 }
 
@@ -115,6 +125,7 @@ mod realmain {
             "--lockfile=bar",
             "--lock_timeout=100",
             "--command_timeout=100",
+            "--directory=/tmp",
             "echo",
             "foo",
         ]));
@@ -124,18 +135,19 @@ mod realmain {
 #[cfg(test)]
 mod run_command {
     use super::*;
+    use tempfile;
 
     #[test]
     fn test_run_command_success() {
         let command = vec!["echo".to_string(), "foo".to_string()];
-        let result = run_command(&command, None);
+        let result = run_command(&command, None, None);
         assert_eq!(result.unwrap(), 0);
     }
 
     #[test]
     fn test_run_command_timeout() {
         let command = vec!["sleep".to_string(), "2".to_string()];
-        let result = run_command(&command, Some(Duration::from_secs(1)));
+        let result = run_command(&command, Some(Duration::from_secs(1)), None);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Command timed out after 1s");
     }
@@ -143,15 +155,33 @@ mod run_command {
     #[test]
     fn test_run_command_success_with_timeout() {
         let command = vec!["sleep".to_string(), "1".to_string()];
-        let result = run_command(&command, Some(Duration::from_secs(2)));
+        let result = run_command(&command, Some(Duration::from_secs(2)), None);
         assert_eq!(result.unwrap(), 0);
     }
 
     #[test]
     fn test_run_command_fail() {
         let command = vec!["false".to_string()];
-        let result = run_command(&command, None);
+        let result = run_command(&command, None, None);
         assert_eq!(result.unwrap(), 1);
+    }
+
+    #[test]
+    fn test_run_command_in_directory() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("foo.txt");
+        File::create(file_path).unwrap();
+
+        let command = vec!["test".to_string(), "-f".to_string(), "foo.txt".to_string()];
+        let result = run_command(
+            &command,
+            None,
+            Some(&temp_dir.path().to_str().unwrap().to_string()),
+        );
+        assert_eq!(result.unwrap(), 0);
+
+        let result_fail = run_command(&command, None, None);
+        assert_eq!(result_fail.unwrap(), 1);
     }
 }
 
