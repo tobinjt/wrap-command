@@ -183,6 +183,22 @@ mod run_command {
         let result_fail = run_command(&command, None, None);
         assert_eq!(result_fail.unwrap(), 1);
     }
+
+    #[test]
+    fn test_run_command_not_found() {
+        let command = vec!["command_that_does_not_exist".to_string()];
+        let result = run_command(&command, None, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No such file or directory"));
+    }
+
+    #[test]
+    fn test_run_command_terminated_by_signal() {
+        let command = vec!["bash".to_string(), "-c".to_string(), "kill $$".to_string()];
+        let result = run_command(&command, None, None);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Command terminated by signal");
+    }
 }
 
 #[cfg(test)]
@@ -192,9 +208,9 @@ mod lock_file {
     use std::thread;
 
     #[test]
-    fn test_lock_file() {
+    fn test_lock_file_timeout() {
         let mut temp_file = env::temp_dir();
-        temp_file.push("test.lock");
+        temp_file.push("test_lock_file_timeout.lock");
 
         let _lock = lock_file(&temp_file, Duration::from_secs(1)).unwrap();
 
@@ -203,5 +219,9 @@ mod lock_file {
             .unwrap();
 
         assert!(lock_result.is_err());
+        assert_eq!(
+            lock_result.unwrap_err(),
+            "Timeout waiting for lockfile after 1s seconds"
+        );
     }
 }
