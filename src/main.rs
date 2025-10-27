@@ -103,7 +103,7 @@ fn run_command(
         .ok_or_else(|| "Command terminated by signal".to_string())
 }
 
-fn realmain(args: Args) -> Result<i32, String> {
+fn realmain(args: Args) -> i32 {
     println!("tmux_window_name: {:?}", args.tmux_window_name);
     println!("lockfile: {:?}", args.lockfile);
     println!("lock_timeout: {:?}", args.lock_timeout);
@@ -117,18 +117,17 @@ fn realmain(args: Args) -> Result<i32, String> {
         command_to_run.insert(1, "-c".to_string());
     }
     let command_timeout = args.command_timeout.map(Duration::from_secs);
-    run_command(&command_to_run, command_timeout, args.directory.as_ref())
+    match run_command(&command_to_run, command_timeout, args.directory.as_ref()) {
+        Ok(exit_code) => exit_code,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            1
+        }
+    }
 }
 
 fn main() {
-    let args = Args::parse();
-    match realmain(args) {
-        Ok(exit_code) => std::process::exit(exit_code),
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            std::process::exit(1);
-        }
-    }
+    std::process::exit(realmain(Args::parse()))
 }
 
 #[cfg(test)]
@@ -147,7 +146,7 @@ mod realmain {
             "echo",
             "foo",
         ]));
-        assert_eq!(result.unwrap(), 0);
+        assert_eq!(result, 0);
     }
 
     #[test]
@@ -155,7 +154,7 @@ mod realmain {
         let result = realmain(Args::parse_from(vec![
             "argv0", "--shell", "echo", "foo", "bar",
         ]));
-        assert_eq!(result.unwrap(), 0);
+        assert_eq!(result, 0);
     }
 }
 
