@@ -111,6 +111,19 @@ fn realmain(args: Args) -> i32 {
     println!("directory: {:?}", args.directory);
     println!("command: {:?}", args.command);
 
+    let _lock_file = if let Some(lockfile_path) = &args.lockfile {
+        let lock_timeout = Duration::from_secs(args.lock_timeout.unwrap_or(0));
+        match lock_file(Path::new(lockfile_path), lock_timeout) {
+            Ok(file) => Some(file),
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                return 1;
+            }
+        }
+    } else {
+        None
+    };
+
     let mut command_to_run = args.command;
     if args.shell {
         command_to_run.insert(0, "sh".to_string());
@@ -133,13 +146,15 @@ fn main() {
 #[cfg(test)]
 mod realmain {
     use super::*;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_realmain() {
+        let temp_file = NamedTempFile::new().unwrap();
         let result = realmain(Args::parse_from(vec![
             "argv0",
             "--tmux_window_name=foo",
-            "--lockfile=bar",
+            &format!("--lockfile={}", temp_file.path().to_str().unwrap()),
             "--lock_timeout=100",
             "--command_timeout=100",
             "--directory=/tmp",
@@ -147,6 +162,22 @@ mod realmain {
             "foo",
         ]));
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn test_realmain_lock_timeout() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let lock_path = temp_file.path();
+        let _lock = lock_file(lock_path, Duration::from_secs(1)).unwrap();
+        let result = realmain(Args::parse_from(vec![
+            "argv0",
+            "--lockfile",
+            lock_path.to_str().unwrap(),
+            "--lock_timeout=1",
+            "echo",
+            "foo",
+        ]));
+        assert_eq!(result, 1);
     }
 
     #[test]
