@@ -34,10 +34,13 @@ struct Args {
     #[arg(long = "directory")]
     directory: Option<String>,
 
+    /// Run the command in a shell.
+    #[arg(long = "shell")]
+    shell: bool,
+
     /// The command to run.
     #[arg(trailing_var_arg = true, required = true)]
     command: Vec<String>,
-    // TODO: add support for shell?
 }
 
 #[allow(dead_code)]
@@ -100,17 +103,32 @@ fn run_command(
         .ok_or_else(|| "Command terminated by signal".to_string())
 }
 
-fn realmain(args: Args) {
+fn realmain(args: Args) -> Result<i32, String> {
     println!("tmux_window_name: {:?}", args.tmux_window_name);
     println!("lockfile: {:?}", args.lockfile);
     println!("lock_timeout: {:?}", args.lock_timeout);
     println!("command_timeout: {:?}", args.command_timeout);
     println!("directory: {:?}", args.directory);
     println!("command: {:?}", args.command);
+
+    let mut command_to_run = args.command;
+    if args.shell {
+        command_to_run.insert(0, "sh".to_string());
+        command_to_run.insert(1, "-c".to_string());
+    }
+    let command_timeout = args.command_timeout.map(Duration::from_secs);
+    run_command(&command_to_run, command_timeout, args.directory.as_ref())
 }
 
 fn main() {
-    realmain(Args::parse());
+    let args = Args::parse();
+    match realmain(args) {
+        Ok(exit_code) => std::process::exit(exit_code),
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -118,8 +136,8 @@ mod realmain {
     use super::*;
 
     #[test]
-    fn not_really_a_test() {
-        realmain(Args::parse_from(vec![
+    fn test_realmain() {
+        let result = realmain(Args::parse_from(vec![
             "argv0",
             "--tmux_window_name=foo",
             "--lockfile=bar",
@@ -129,13 +147,21 @@ mod realmain {
             "echo",
             "foo",
         ]));
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_realmain_with_shell() {
+        let result = realmain(Args::parse_from(vec![
+            "argv0", "--shell", "echo", "foo", "bar",
+        ]));
+        assert_eq!(result.unwrap(), 0);
     }
 }
 
 #[cfg(test)]
 mod run_command {
     use super::*;
-    use tempfile;
 
     #[test]
     fn test_run_command_success() {
