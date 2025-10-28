@@ -34,7 +34,7 @@ struct Args {
     #[arg(long = "directory")]
     directory: Option<String>,
 
-    /// Run the command in a shell.
+    /// Prepend `["sh", "-c"]` to the command.  Doesn't otherwise modify the command.
     #[arg(long = "shell")]
     shell: bool,
 
