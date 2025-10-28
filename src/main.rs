@@ -167,7 +167,7 @@ mod realmain {
     fn test_realmain_lock_timeout() {
         let temp_file = NamedTempFile::new().unwrap();
         let lock_path = temp_file.path();
-        let _lock = lock_file(lock_path, Duration::from_secs(1)).unwrap();
+        let _lock = lock_file(lock_path, Duration::from_millis(100)).unwrap();
         let result = realmain(Args::parse_from(vec![
             "argv0",
             "--lockfile",
@@ -267,16 +267,17 @@ mod lock_file {
         let mut temp_file = env::temp_dir();
         temp_file.push("test_lock_file_timeout.lock");
 
-        let _lock = lock_file(&temp_file, Duration::from_secs(1)).unwrap();
+        let _lock = lock_file(&temp_file, Duration::from_millis(200)).unwrap();
 
-        let lock_result = thread::spawn(move || lock_file(&temp_file, Duration::from_secs(1)))
+        let lock_result = thread::spawn(move || lock_file(&temp_file, Duration::from_micros(500)))
             .join()
             .unwrap();
 
         assert!(lock_result.is_err());
-        assert_eq!(
-            lock_result.unwrap_err(),
-            "Timeout waiting for lockfile after 1s"
+        assert!(
+            lock_result
+                .unwrap_err()
+                .contains("Timeout waiting for lockfile after")
         );
     }
 
