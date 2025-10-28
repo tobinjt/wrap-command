@@ -51,7 +51,7 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
         match file.try_lock_exclusive() {
             Ok(true) => return Ok(file),
             Ok(false) => {
-                if start.elapsed() > lock_timeout {
+                if start.elapsed() >= lock_timeout {
                     return Err(
                         format!("Timeout waiting for lockfile after {lock_timeout:?}").to_string(),
                     );
