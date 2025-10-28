@@ -22,13 +22,13 @@ struct Args {
     #[arg(long = "lockfile")]
     lockfile: Option<String>,
 
-    /// The lock_timeout in seconds.
-    #[arg(long = "lock_timeout")]
-    lock_timeout: Option<u64>,
+    /// The lock_timeout in milliseconds.
+    #[arg(long = "lock_timeout_ms")]
+    lock_timeout_ms: Option<u64>,
 
-    /// The command_timeout in seconds.
-    #[arg(long = "command_timeout")]
-    command_timeout: Option<u64>,
+    /// The command_timeout in milliseconds.
+    #[arg(long = "command_timeout_ms")]
+    command_timeout_ms: Option<u64>,
 
     /// The directory to run the command in.
     #[arg(long = "directory")]
@@ -105,13 +105,13 @@ fn run_command(
 fn realmain(args: Args) -> i32 {
     println!("tmux_window_name: {:?}", args.tmux_window_name);
     println!("lockfile: {:?}", args.lockfile);
-    println!("lock_timeout: {:?}", args.lock_timeout);
-    println!("command_timeout: {:?}", args.command_timeout);
+    println!("lock_timeout: {:?}", args.lock_timeout_ms);
+    println!("command_timeout: {:?}", args.command_timeout_ms);
     println!("directory: {:?}", args.directory);
     println!("command: {:?}", args.command);
 
     let _lock_file = if let Some(lockfile_path) = &args.lockfile {
-        let lock_timeout = Duration::from_secs(args.lock_timeout.unwrap_or(0));
+        let lock_timeout = Duration::from_millis(args.lock_timeout_ms.unwrap_or(0));
         match lock_file(Path::new(lockfile_path), lock_timeout) {
             Ok(file) => Some(file),
             Err(e) => {
@@ -128,7 +128,7 @@ fn realmain(args: Args) -> i32 {
         command_to_run.insert(0, "sh".to_string());
         command_to_run.insert(1, "-c".to_string());
     }
-    let command_timeout = args.command_timeout.map(Duration::from_secs);
+    let command_timeout = args.command_timeout_ms.map(Duration::from_millis);
     match run_command(&command_to_run, command_timeout, args.directory.as_ref()) {
         Ok(exit_code) => exit_code,
         Err(e) => {
@@ -154,8 +154,8 @@ mod realmain {
             "argv0",
             "--tmux_window_name=foo",
             &format!("--lockfile={}", temp_file.path().to_str().unwrap()),
-            "--lock_timeout=100",
-            "--command_timeout=100",
+            "--lock_timeout_ms=100",
+            "--command_timeout_ms=100",
             "--directory=/tmp",
             "echo",
             "foo",
@@ -172,7 +172,7 @@ mod realmain {
             "argv0",
             "--lockfile",
             lock_path.to_str().unwrap(),
-            "--lock_timeout=1",
+            "--lock_timeout_ms=100",
             "echo",
             "foo",
         ]));
@@ -312,9 +312,9 @@ mod clap_test {
             "asdf",
             "--lockfile",
             "qwerty",
-            "--lock_timeout",
+            "--lock_timeout_ms",
             "123",
-            "--command_timeout",
+            "--command_timeout_ms",
             "456",
             "--directory",
             "/no/where",
@@ -325,8 +325,8 @@ mod clap_test {
         ]);
         assert_eq!(Some("asdf"), args.tmux_window_name.as_deref());
         assert_eq!(Some("qwerty"), args.lockfile.as_deref());
-        assert_eq!(Some(123), args.lock_timeout);
-        assert_eq!(Some(456), args.command_timeout);
+        assert_eq!(Some(123), args.lock_timeout_ms);
+        assert_eq!(Some(456), args.command_timeout_ms);
         assert_eq!(Some("/no/where"), args.directory.as_deref());
         assert_eq!(
             vec!["echo".to_string(), "foo".to_string(), "bar".to_string()],
