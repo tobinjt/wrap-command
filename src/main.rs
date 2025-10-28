@@ -281,3 +281,49 @@ mod lock_file {
         );
     }
 }
+
+#[cfg(test)]
+mod clap_test {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn verify() {
+        Args::command().debug_assert();
+    }
+
+    #[test]
+    fn parse_args() {
+        // Checks that I've configured the parser correctly.
+        let args = Args::parse_from(vec!["argv0", "echo"]);
+        assert_eq!(vec!["echo".to_string()], args.command);
+        assert!(!args.shell);
+
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name",
+            "asdf",
+            "--lockfile",
+            "qwerty",
+            "--lock_timeout",
+            "123",
+            "--command_timeout",
+            "456",
+            "--directory",
+            "/no/where",
+            "--shell",
+            "echo",
+            "foo",
+            "bar",
+        ]);
+        assert_eq!(Some("asdf"), args.tmux_window_name.as_deref());
+        assert_eq!(Some("qwerty"), args.lockfile.as_deref());
+        assert_eq!(Some(123), args.lock_timeout);
+        assert_eq!(Some(456), args.command_timeout);
+        assert_eq!(Some("/no/where"), args.directory.as_deref());
+        assert_eq!(
+            vec!["echo".to_string(), "foo".to_string(), "bar".to_string()],
+            args.command
+        );
+    }
+}
