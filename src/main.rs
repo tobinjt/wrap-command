@@ -52,10 +52,9 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
             Ok(true) => return Ok(file),
             Ok(false) => {
                 if start.elapsed() > lock_timeout {
-                    return Err(format!(
-                        "Timeout waiting for lockfile after {lock_timeout:?} seconds"
-                    )
-                    .to_string());
+                    return Err(
+                        format!("Timeout waiting for lockfile after {lock_timeout:?}").to_string(),
+                    );
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
@@ -277,8 +276,15 @@ mod lock_file {
         assert!(lock_result.is_err());
         assert_eq!(
             lock_result.unwrap_err(),
-            "Timeout waiting for lockfile after 1s seconds"
+            "Timeout waiting for lockfile after 1s"
         );
+    }
+
+    #[test]
+    fn test_lock_file_error() {
+        let lock_result = lock_file(Path::new("/dev/fd"), Duration::from_secs(1));
+        assert!(lock_result.is_err());
+        assert!(lock_result.unwrap_err().contains("Is a directory"));
     }
 }
 
