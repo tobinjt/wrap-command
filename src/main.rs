@@ -60,7 +60,7 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
             }
             // TODO: how do I test this?
             Err(error_message) => {
-                return Err(error_message.to_string());
+                return Err(error_message.to_string()); // TODO: how do I test this?
             }
         }
     }
@@ -80,21 +80,22 @@ fn run_command(
     child_command.process_group(0);
 
     // TODO: record the child pgid somewhere and kill it on receipt of SIGINT.
-    let mut child = child_command.spawn().map_err(|e| e.to_string())?;
+    let mut child = child_command.spawn().map_err(|e| e.to_string())?; // TODO: how do I test this?
 
     let exit_status = match timeout {
         Some(duration) => match child.wait_timeout(duration).map_err(|e| e.to_string())? {
+            // TODO: how do I test this?
             Some(status) => Ok(status),
             None => {
                 let pgid = Pid::from_raw(child.id() as i32);
                 // TODO: send SIGINT first to give time for a graceful exit, then send SIGKILL
                 // after 1 second.
-                killpg(pgid, Signal::SIGKILL).map_err(|e| e.to_string())?;
-                child.wait().map_err(|e| e.to_string())?;
+                killpg(pgid, Signal::SIGKILL).map_err(|e| e.to_string())?; // TODO: how do I test this?
+                child.wait().map_err(|e| e.to_string())?; // TODO: how do I test this?
                 Err(format!("Command timed out after {duration:?}"))
             }
         },
-        None => child.wait().map_err(|e| e.to_string()),
+        None => child.wait().map_err(|e| e.to_string()), // TODO: how do I test this?
     }?;
 
     exit_status
@@ -132,7 +133,7 @@ fn realmain(args: Args) -> i32 {
     match run_command(&command_to_run, command_timeout, args.directory.as_ref()) {
         Ok(exit_code) => exit_code,
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("Error: {}", e); // TODO: how do I test this?
             1
         }
     }
