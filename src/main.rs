@@ -43,7 +43,6 @@ struct Args {
     command: Vec<String>,
 }
 
-#[allow(dead_code)]
 fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, String> {
     let start = Instant::now();
     loop {
@@ -66,7 +65,6 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
     }
 }
 
-#[allow(dead_code)]
 fn run_command(
     command: &[String],
     timeout: Option<Duration>,
