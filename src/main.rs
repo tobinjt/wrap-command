@@ -137,7 +137,7 @@ fn realmain(args: Args) -> i32 {
     match run_command(&command_to_run, command_timeout, args.directory.as_ref()) {
         Ok(exit_code) => exit_code,
         Err(e) => {
-            eprintln!("Error: {}", e); // TODO: how do I test this?
+            eprintln!("Error: {}", e);
             1
         }
     }
@@ -190,6 +190,12 @@ mod realmain {
             "argv0", "--shell", "echo", "foo", "bar",
         ]));
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn test_realmain_command_terminated_by_signal() {
+        let result = realmain(Args::parse_from(vec!["argv0", "--shell", "kill -9 $$"]));
+        assert_eq!(result, 1);
     }
 }
 

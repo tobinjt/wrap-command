@@ -16,7 +16,7 @@ repos:
         args:
           [
             # TODO: improve test coverage.
-            "--fail-uncovered-lines=11",
+            "--fail-uncovered-lines=8",
             "--fail-uncovered-functions=5",
             "--quiet",
             "--show-missing-lines",
