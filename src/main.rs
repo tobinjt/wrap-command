@@ -213,14 +213,14 @@ mod run_command {
     #[test]
     fn test_run_command_timeout() {
         let command = vec!["sleep".to_string(), "2".to_string()];
-        let result = run_command(&command, Some(Duration::from_secs(1)), None);
+        let result = run_command(&command, Some(Duration::from_millis(100)), None);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Command timed out after 1s");
+        assert_eq!(result.unwrap_err(), "Command timed out after 100ms");
     }
 
     #[test]
     fn test_run_command_success_with_timeout() {
-        let command = vec!["sleep".to_string(), "1".to_string()];
+        let command = vec!["sleep".to_string(), "0.1".to_string()];
         let result = run_command(&command, Some(Duration::from_secs(2)), None);
         assert_eq!(result.unwrap(), 0);
     }
