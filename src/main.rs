@@ -80,22 +80,26 @@ fn run_command(
     child_command.process_group(0);
 
     // TODO: record the child pgid somewhere and kill it on receipt of SIGINT.
-    let mut child = child_command.spawn().map_err(|e| e.to_string())?; // TODO: how do I test this?
+    let mut child = child_command.spawn().map_err(|e| e.to_string())?;
 
     let exit_status = match timeout {
+        // I can't test this without causing pipe() or similar to fail.
         Some(duration) => match child.wait_timeout(duration).map_err(|e| e.to_string())? {
-            // TODO: how do I test this?
             Some(status) => Ok(status),
             None => {
                 let pgid = Pid::from_raw(child.id() as i32);
                 // TODO: send SIGINT first to give time for a graceful exit, then send SIGKILL
                 // after 1 second.
-                killpg(pgid, Signal::SIGKILL).map_err(|e| e.to_string())?; // TODO: how do I test this?
-                child.wait().map_err(|e| e.to_string())?; // TODO: how do I test this?
+                // I can't test this without causing killpg() to fail, which would require
+                // dependency injection I guess.  Maybe I could inject `Command::new` instead?
+                killpg(pgid, Signal::SIGKILL).map_err(|e| e.to_string())?;
+                // Likewise, I'd need to inject `Command::new`.
+                child.wait().map_err(|e| e.to_string())?;
                 Err(format!("Command timed out after {duration:?}"))
             }
         },
-        None => child.wait().map_err(|e| e.to_string()), // TODO: how do I test this?
+        // Likewise, I'd need to inject `Command::new`.
+        None => child.wait().map_err(|e| e.to_string()),
     }?;
 
     exit_status
