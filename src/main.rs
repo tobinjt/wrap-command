@@ -58,7 +58,9 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
                 std::thread::sleep(Duration::from_millis(100));
             }
             Err(error_message) => {
-                return Err(error_message.to_string()); // TODO: how do I test this?
+                // I can't test this without making try_lock_exclusive() fail, which looks
+                // ~impossible from reading the source.
+                return Err(error_message.to_string());
             }
         }
     }
