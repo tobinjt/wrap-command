@@ -104,6 +104,13 @@ fn make_tmux_command(args: Args) -> Vec<String> {
 }
 
 fn run_command(args: &Args) -> Result<i32, String> {
+    let _lock_file = if let Some(lockfile_path) = &args.lockfile {
+        let lock_timeout = Duration::from_millis(args.lock_timeout_ms.unwrap_or(0));
+        Some(lock_file(Path::new(lockfile_path), lock_timeout)?)
+    } else {
+        None
+    };
+
     let mut child_command = Command::new(&args.command[0]);
     child_command.args(&args.command[1..]);
     if let Some(dir) = &args.directory {
@@ -144,18 +151,6 @@ fn realmain(args: Args) -> i32 {
         println!("{:?}", make_tmux_command(args));
         return 0;
     }
-    let _lock_file = if let Some(lockfile_path) = &args.lockfile {
-        let lock_timeout = Duration::from_millis(args.lock_timeout_ms.unwrap_or(0));
-        match lock_file(Path::new(lockfile_path), lock_timeout) {
-            Ok(file) => Some(file),
-            Err(e) => {
-                eprintln!("Error: {}", e);
-                return 1;
-            }
-        }
-    } else {
-        None
-    };
 
     let args_for_command = if args.shell {
         let mut command_with_shell = vec!["sh".to_string(), "-c".to_string()];
@@ -316,12 +311,32 @@ mod realmain {
 #[cfg(test)]
 mod run_command {
     use super::*;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_run_command_success() {
         let args = Args::parse_from(vec!["argv0", "echo", "foo"]);
         let result = run_command(&args);
         assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_run_command_lock_timeout() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let lock_path = temp_file.path();
+        let _lock = lock_file(lock_path, Duration::from_millis(100)).unwrap();
+
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--lockfile",
+            lock_path.to_str().unwrap(),
+            "--lock_timeout_ms=100",
+            "echo",
+            "foo",
+        ]);
+        let result = run_command(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Timeout waiting for lockfile"));
     }
 
     #[test]
