@@ -12,7 +12,7 @@ use wait_timeout::ChildExt;
 
 /// A program that wraps a command, and ensures that only one instance of the
 /// command is running at a time.
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// The name of the tmux window to use.
@@ -103,53 +103,43 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     full_command
 }
 
-fn run_command(
-    command: &[String],
-    timeout: Option<Duration>,
-    directory: Option<&String>,
-) -> Result<i32, String> {
-    let mut child_command = Command::new(&command[0]);
-    child_command.args(&command[1..]);
-    if let Some(dir) = directory {
+fn run_command(args: &Args) -> Result<i32, String> {
+    let mut child_command = Command::new(&args.command[0]);
+    child_command.args(&args.command[1..]);
+    if let Some(dir) = &args.directory {
         child_command.current_dir(dir);
     }
     child_command.process_group(0);
 
     let mut child = child_command.spawn().map_err(|e| e.to_string())?;
 
+    let timeout = args.command_timeout_ms.map(Duration::from_millis);
     let exit_status = match timeout {
-        // I can't test this without causing pipe() or similar to fail.
-        Some(duration) => match child.wait_timeout(duration).map_err(|e| e.to_string())? {
-            Some(status) => Ok(status),
-            None => {
-                let pgid = Pid::from_raw(child.id() as i32);
-                // TODO: send SIGINT first to give time for a graceful exit, then send SIGKILL
-                // after 1 second.
-                // I can't test this without causing killpg() to fail, which would require
-                // dependency injection I guess.  Maybe I could inject `Command::new` instead?
-                killpg(pgid, Signal::SIGKILL).map_err(|e| e.to_string())?;
-                // Likewise, I'd need to inject `Command::new`.
-                child.wait().map_err(|e| e.to_string())?;
-                Err(format!("Command timed out after {duration:?}"))
+        Some(duration) => {
+            match child.wait_timeout(duration).map_err(|e| e.to_string())? {
+                Some(status) => Ok(status),
+                None => {
+                    let pgid = Pid::from_raw(child.id() as i32);
+                    // TODO: send SIGINT first to give time for a graceful exit, then send SIGKILL
+                    // after 1 second.
+                    // I can't test this without causing killpg() to fail, which would require
+                    // dependency injection I guess.  Maybe I could inject `Command::new` instead?
+                    killpg(pgid, Signal::SIGKILL).map_err(|e| e.to_string())?;
+                    // Likewise, I'd need to inject `Command::new`.
+                    child.wait().map_err(|e| e.to_string())?;
+                    Err(format!("Command timed out after {duration:?}"))
+                }
             }
-        },
+        }
         // Likewise, I'd need to inject `Command::new`.
         None => child.wait().map_err(|e| e.to_string()),
     }?;
-
     exit_status
         .code()
         .ok_or_else(|| "Command terminated by signal".to_string())
 }
 
 fn realmain(args: Args) -> i32 {
-    println!("tmux_window_name: {:?}", args.tmux_window_name);
-    println!("lockfile: {:?}", args.lockfile);
-    println!("lock_timeout: {:?}", args.lock_timeout_ms);
-    println!("command_timeout: {:?}", args.command_timeout_ms);
-    println!("directory: {:?}", args.directory);
-    println!("command: {:?}", args.command);
-
     if args.tmux_window_name.is_some() {
         println!("{:?}", make_tmux_command(args));
         return 0;
@@ -167,13 +157,18 @@ fn realmain(args: Args) -> i32 {
         None
     };
 
-    let mut command_to_run = args.command;
-    if args.shell {
-        command_to_run.insert(0, "sh".to_string());
-        command_to_run.insert(1, "-c".to_string());
-    }
-    let command_timeout = args.command_timeout_ms.map(Duration::from_millis);
-    match run_command(&command_to_run, command_timeout, args.directory.as_ref()) {
+    let args_for_command = if args.shell {
+        let mut command_with_shell = vec!["sh".to_string(), "-c".to_string()];
+        command_with_shell.extend_from_slice(&args.command);
+        Args {
+            command: command_with_shell,
+            ..args.clone()
+        }
+    } else {
+        args.clone()
+    };
+
+    match run_command(&args_for_command) {
         Ok(exit_code) => exit_code,
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -324,30 +319,36 @@ mod run_command {
 
     #[test]
     fn test_run_command_success() {
-        let command = vec!["echo".to_string(), "foo".to_string()];
-        let result = run_command(&command, None, None);
+        let args = Args::parse_from(vec!["argv0", "echo", "foo"]);
+        let result = run_command(&args);
         assert_eq!(result.unwrap(), 0);
     }
 
     #[test]
     fn test_run_command_timeout() {
-        let command = vec!["sleep".to_string(), "2".to_string()];
-        let result = run_command(&command, Some(Duration::from_millis(100)), None);
+        let args = Args::parse_from(vec!["argv0", "--command_timeout_ms", "100", "sleep", "2"]);
+        let result = run_command(&args);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Command timed out after 100ms");
     }
 
     #[test]
     fn test_run_command_success_with_timeout() {
-        let command = vec!["sleep".to_string(), "0.1".to_string()];
-        let result = run_command(&command, Some(Duration::from_secs(2)), None);
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--command_timeout_ms",
+            "2000",
+            "sleep",
+            "0.1",
+        ]);
+        let result = run_command(&args);
         assert_eq!(result.unwrap(), 0);
     }
 
     #[test]
     fn test_run_command_fail() {
-        let command = vec!["false".to_string()];
-        let result = run_command(&command, None, None);
+        let args = Args::parse_from(vec!["argv0", "false"]);
+        let result = run_command(&args);
         assert_eq!(result.unwrap(), 1);
     }
 
@@ -357,30 +358,34 @@ mod run_command {
         let file_path = temp_dir.path().join("foo.txt");
         File::create(file_path).unwrap();
 
-        let command = vec!["test".to_string(), "-f".to_string(), "foo.txt".to_string()];
-        let result = run_command(
-            &command,
-            None,
-            Some(&temp_dir.path().to_str().unwrap().to_string()),
-        );
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--directory",
+            temp_dir.path().to_str().unwrap(),
+            "test",
+            "-f",
+            "foo.txt",
+        ]);
+        let result = run_command(&args);
         assert_eq!(result.unwrap(), 0);
 
-        let result_fail = run_command(&command, None, None);
+        let args_fail = Args::parse_from(vec!["argv0", "test", "-f", "foo.txt"]);
+        let result_fail = run_command(&args_fail);
         assert_eq!(result_fail.unwrap(), 1);
     }
 
     #[test]
     fn test_run_command_not_found() {
-        let command = vec!["command_that_does_not_exist".to_string()];
-        let result = run_command(&command, None, None);
+        let args = Args::parse_from(vec!["argv0", "command_that_does_not_exist"]);
+        let result = run_command(&args);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("No such file or directory"));
     }
 
     #[test]
     fn test_run_command_terminated_by_signal() {
-        let command = vec!["bash".to_string(), "-c".to_string(), "kill $$".to_string()];
-        let result = run_command(&command, None, None);
+        let args = Args::parse_from(vec!["argv0", "bash", "-c", "kill $$"]);
+        let result = run_command(&args);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Command terminated by signal");
     }
