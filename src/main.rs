@@ -2,6 +2,7 @@ use clap::Parser;
 use fs4::fs_std::FileExt;
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
+use std::env;
 use std::fs::File;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
@@ -66,6 +67,42 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
     }
 }
 
+#[allow(dead_code)]
+fn make_tmux_command(args: Args) -> Vec<String> {
+    let mut full_command = vec![
+        "tmux".to_string(),
+        "new-window".to_string(),
+        "-n".to_string(),
+        args.tmux_window_name
+            .expect("Internal error: make_tmux_command called without tmux_window_name"),
+        env::current_exe()
+            .expect("cannot determine current executable")
+            .display()
+            .to_string(),
+    ];
+    if let Some(directory) = args.directory {
+        full_command.extend_from_slice(&["--directory".to_string(), directory.to_string()]);
+    }
+    if let Some(lockfile) = args.lockfile {
+        full_command.extend_from_slice(&["--lockfile".to_string(), lockfile.to_string()]);
+    }
+    if let Some(lock_timeout_ms) = args.lock_timeout_ms {
+        full_command
+            .extend_from_slice(&["--lock_timeout_ms".to_string(), lock_timeout_ms.to_string()]);
+    }
+    if let Some(command_timeout_ms) = args.command_timeout_ms {
+        full_command.extend_from_slice(&[
+            "--command_timeout_ms".to_string(),
+            command_timeout_ms.to_string(),
+        ]);
+    }
+    if args.shell {
+        full_command.extend_from_slice(&["--shell".to_string()]);
+    }
+    full_command.extend_from_slice(&args.command);
+    full_command
+}
+
 fn run_command(
     command: &[String],
     timeout: Option<Duration>,
@@ -113,6 +150,10 @@ fn realmain(args: Args) -> i32 {
     println!("directory: {:?}", args.directory);
     println!("command: {:?}", args.command);
 
+    if args.tmux_window_name.is_some() {
+        println!("{:?}", make_tmux_command(args));
+        return 0;
+    }
     let _lock_file = if let Some(lockfile_path) = &args.lockfile {
         let lock_timeout = Duration::from_millis(args.lock_timeout_ms.unwrap_or(0));
         match lock_file(Path::new(lockfile_path), lock_timeout) {
@@ -143,6 +184,86 @@ fn realmain(args: Args) -> i32 {
 
 fn main() {
     std::process::exit(realmain(Args::parse()))
+}
+
+#[cfg(test)]
+mod make_tmux_command {
+    use super::*;
+
+    #[test]
+    fn test_make_tmux_command_basic() {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name=my_window",
+            "echo",
+            "hello",
+        ]);
+        let result = make_tmux_command(args);
+        let current_exe = env::current_exe()
+            .expect("cannot determine current executable")
+            .display()
+            .to_string();
+        assert_eq!(
+            result,
+            vec![
+                "tmux",
+                "new-window",
+                "-n",
+                "my_window",
+                &current_exe,
+                "echo",
+                "hello"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_make_tmux_command_all_args() {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name=another_window",
+            "--lockfile=/tmp/foo.lock",
+            "--lock_timeout_ms=1000",
+            "--command_timeout_ms=5000",
+            "--directory=/tmp",
+            "--shell",
+            "ls",
+            "-la",
+        ]);
+        let result = make_tmux_command(args);
+        let current_exe = env::current_exe()
+            .expect("cannot determine current executable")
+            .display()
+            .to_string();
+        assert_eq!(
+            result,
+            vec![
+                "tmux",
+                "new-window",
+                "-n",
+                "another_window",
+                &current_exe,
+                "--directory",
+                "/tmp",
+                "--lockfile",
+                "/tmp/foo.lock",
+                "--lock_timeout_ms",
+                "1000",
+                "--command_timeout_ms",
+                "5000",
+                "--shell",
+                "ls",
+                "-la"
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Internal error: make_tmux_command called without tmux_window_name")]
+    fn test_make_tmux_command_no_window_name() {
+        let args = Args::parse_from(vec!["argv0", "echo", "hello"]);
+        make_tmux_command(args);
+    }
 }
 
 #[cfg(test)]
