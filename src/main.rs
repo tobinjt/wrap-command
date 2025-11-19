@@ -146,13 +146,18 @@ fn run_command(args: &Args) -> Result<i32, String> {
         .ok_or_else(|| "Command terminated by signal".to_string())
 }
 
-fn realmain(args: Args) -> i32 {
+fn make_command_to_run(args: Args) -> Args {
     if args.tmux_window_name.is_some() {
-        println!("{:?}", make_tmux_command(args));
-        return 0;
-    }
-
-    let args_for_command = if args.shell {
+        Args {
+            command: make_tmux_command(args),
+            tmux_window_name: None,
+            lockfile: None,
+            lock_timeout_ms: None,
+            command_timeout_ms: None,
+            directory: None,
+            shell: false,
+        }
+    } else if args.shell {
         let mut command_with_shell = vec!["sh".to_string(), "-c".to_string()];
         command_with_shell.extend_from_slice(&args.command);
         Args {
@@ -161,7 +166,11 @@ fn realmain(args: Args) -> i32 {
         }
     } else {
         args.clone()
-    };
+    }
+}
+
+fn realmain(args: Args) -> i32 {
+    let args_for_command = make_command_to_run(args);
 
     match run_command(&args_for_command) {
         Ok(exit_code) => exit_code,
@@ -436,6 +445,71 @@ mod lock_file {
         let lock_result = lock_file(Path::new("/dev/fd"), Duration::from_secs(1));
         assert!(lock_result.is_err());
         assert!(lock_result.unwrap_err().contains("Is a directory"));
+    }
+}
+
+#[cfg(test)]
+mod make_command_to_run {
+    use super::*;
+
+    #[test]
+    fn test_make_command_to_run_tmux() {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name=my_window",
+            "--lockfile=/tmp/foo.lock",
+            "echo",
+            "hello",
+        ]);
+        let result_args = make_command_to_run(args);
+        let current_exe = env::current_exe()
+            .expect("cannot determine current executable")
+            .display()
+            .to_string();
+        assert_eq!(
+            result_args.command,
+            vec![
+                "tmux",
+                "new-window",
+                "-n",
+                "my_window",
+                &current_exe,
+                "--lockfile",
+                "/tmp/foo.lock",
+                "echo",
+                "hello"
+            ]
+        );
+        assert!(result_args.tmux_window_name.is_none());
+        assert!(result_args.lockfile.is_none());
+        assert!(result_args.lock_timeout_ms.is_none());
+        assert!(result_args.command_timeout_ms.is_none());
+        assert!(result_args.directory.is_none());
+        assert!(!result_args.shell);
+    }
+
+    #[test]
+    fn test_make_command_to_run_shell() {
+        let args = Args::parse_from(vec!["argv0", "--shell", "echo", "foo", "bar"]);
+        let result_args = make_command_to_run(args);
+        assert_eq!(result_args.command, vec!["sh", "-c", "echo", "foo", "bar"]);
+        assert!(result_args.shell);
+    }
+
+    #[test]
+    fn test_make_command_to_run_no_modification() {
+        let args = Args::parse_from(vec!["argv0", "--lockfile=/tmp/foo.lock", "echo", "hello"]);
+        let original_args = args.clone();
+        let result_args = make_command_to_run(args);
+        assert_eq!(result_args.command, original_args.command);
+        assert_eq!(result_args.lockfile, original_args.lockfile);
+        assert_eq!(result_args.lock_timeout_ms, original_args.lock_timeout_ms);
+        assert_eq!(
+            result_args.command_timeout_ms,
+            original_args.command_timeout_ms
+        );
+        assert_eq!(result_args.directory, original_args.directory);
+        assert_eq!(result_args.shell, original_args.shell);
     }
 }
 
