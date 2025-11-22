@@ -15,12 +15,14 @@ const LONG_ABOUT: &str = "A program that wraps a command, optionally:
   - either failing immediately if the lock is held or waiting for a
     configurable time for the lock to be released (--lock_timeout_ms)
 - running the command with a timeout (--command_timeout_ms)
+  - the signal to send can be specified with --signal, it defaults
+    to SIGKILL (9).
 - running the command from a different directory (--directory)
 - passing the command to `sh -c` so shell metacharacters like && or
   $() can be used (--shell)
 - running the command in a new tmux window (--tmux_window_name)
 Any combination of flags is supported, except --lock_timeout_ms
-without --lockfile.";
+without --lockfile or --signal without --command_timeout_ms.";
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about=LONG_ABOUT)]
@@ -40,6 +42,11 @@ struct Args {
     /// The command_timeout in milliseconds.
     #[arg(long = "command_timeout_ms")]
     command_timeout_ms: Option<u64>,
+
+    /// The signal to send to the command if it times out. Can be a signal name (e.g. "SIGTERM") or a signal number (e.g. "15").
+    /// Defaults to SIGKILL (9) if not specified.
+    #[arg(long = "signal", requires = "command_timeout_ms")]
+    signal: Option<String>,
 
     /// The directory to run the command in.
     #[arg(long = "directory")]
@@ -106,6 +113,9 @@ fn make_tmux_command(args: Args) -> Vec<String> {
             command_timeout_ms.to_string(),
         ]);
     }
+    if let Some(signal) = args.signal {
+        full_command.extend_from_slice(&["--signal".to_string(), signal]);
+    }
     if args.shell {
         full_command.extend_from_slice(&["--shell".to_string()]);
     }
@@ -137,11 +147,16 @@ fn run_command(args: &Args) -> Result<i32, String> {
                 Some(status) => Ok(status),
                 None => {
                     let pgid = Pid::from_raw(child.id() as i32);
+                    let signal = match args.signal.as_deref() {
+                        Some(s) => s.parse().map_err(|e| format!("Invalid signal: {e}"))?,
+                        None => Signal::SIGKILL,
+                    };
+                    println!("signal: {}", signal);
                     // TODO: send SIGINT first to give time for a graceful exit, then send SIGKILL
                     // after 1 second.
                     // I can't test this without causing killpg() to fail, which would require
                     // dependency injection I guess.  Maybe I could inject `Command::new` instead?
-                    killpg(pgid, Signal::SIGKILL).map_err(|e| e.to_string())?;
+                    killpg(pgid, signal).map_err(|e| e.to_string())?;
                     // Likewise, I'd need to inject `Command::new`.
                     child.wait().map_err(|e| e.to_string())?;
                     Err(format!("Command timed out after {duration:?}"))
@@ -164,6 +179,7 @@ fn make_command_to_run(args: Args) -> Args {
             lockfile: None,
             lock_timeout_ms: None,
             command_timeout_ms: None,
+            signal: None,
             directory: None,
             shell: false,
         }
@@ -236,6 +252,7 @@ mod make_tmux_command {
             "--lock_timeout_ms=1000",
             "--command_timeout_ms=5000",
             "--directory=/tmp",
+            "--signal=SIGTERM",
             "--shell",
             "ls",
             "-la",
@@ -262,6 +279,8 @@ mod make_tmux_command {
                 "1000",
                 "--command_timeout_ms",
                 "5000",
+                "--signal",
+                "SIGTERM",
                 "--shell",
                 "ls",
                 "-la"
@@ -425,6 +444,22 @@ mod run_command {
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Command terminated by signal");
     }
+
+    #[test]
+    fn test_run_command_invalid_signal() {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--command_timeout_ms",
+            "10",
+            "--signal",
+            "INVALID_SIGNAL",
+            "sleep",
+            "1",
+        ]);
+        let result = run_command(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid signal"));
+    }
 }
 
 #[cfg(test)]
@@ -553,6 +588,8 @@ mod clap_test {
             "123",
             "--command_timeout_ms",
             "456",
+            "--signal",
+            "SIGINT",
             "--directory",
             "/no/where",
             "--shell",
@@ -564,6 +601,7 @@ mod clap_test {
         assert_eq!(Some("qwerty"), args.lockfile.as_deref());
         assert_eq!(Some(123), args.lock_timeout_ms);
         assert_eq!(Some(456), args.command_timeout_ms);
+        assert_eq!(Some("SIGINT"), args.signal.as_deref());
         assert_eq!(Some("/no/where"), args.directory.as_deref());
         assert_eq!(
             vec!["echo".to_string(), "foo".to_string(), "bar".to_string()],
@@ -579,5 +617,15 @@ mod clap_test {
         let error_msg = err.to_string();
         assert!(error_msg.contains("required"));
         assert!(error_msg.contains("--lockfile"));
+    }
+
+    #[test]
+    fn test_signal_requires_command_timeout_ms() {
+        let result = Args::try_parse_from(vec!["argv0", "--signal=SIGTERM", "echo", "foo"]);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let error_msg = err.to_string();
+        assert!(error_msg.contains("required"));
+        assert!(error_msg.contains("--command_timeout_ms"));
     }
 }
