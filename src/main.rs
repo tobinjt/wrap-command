@@ -18,7 +18,9 @@ const LONG_ABOUT: &str = "A program that wraps a command, optionally:
 - running the command from a different directory (--directory)
 - passing the command to `sh -c` so shell metacharacters like && or
   $() can be used (--shell)
-- running the command in a new tmux window (--tmux_window_name)";
+- running the command in a new tmux window (--tmux_window_name)
+Any combination of flags is supported, except --lock_timeout_ms
+without --lockfile.";
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about=LONG_ABOUT)]
@@ -32,7 +34,7 @@ struct Args {
     lockfile: Option<String>,
 
     /// The lock_timeout in milliseconds.
-    #[arg(long = "lock_timeout_ms")]
+    #[arg(long = "lock_timeout_ms", requires = "lockfile")]
     lock_timeout_ms: Option<u64>,
 
     /// The command_timeout in milliseconds.
@@ -567,5 +569,15 @@ mod clap_test {
             vec!["echo".to_string(), "foo".to_string(), "bar".to_string()],
             args.command
         );
+    }
+
+    #[test]
+    fn test_lock_timeout_requires_lockfile() {
+        let result = Args::try_parse_from(vec!["argv0", "--lock_timeout_ms=100", "echo", "foo"]);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let error_msg = err.to_string();
+        assert!(error_msg.contains("required"));
+        assert!(error_msg.contains("--lockfile"));
     }
 }
