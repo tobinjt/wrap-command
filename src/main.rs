@@ -10,10 +10,18 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 use wait_timeout::ChildExt;
 
-/// A program that wraps a command, and ensures that only one instance of the
-/// command is running at a time.
+const LONG_ABOUT: &str = "A program that wraps a command, optionally:
+- using a lock to ensure only one instance is running (--lockfile)
+  - either failing immediately if the lock is held or waiting for a
+    configurable time for the lock to be released (--lock_timeout_ms)
+- running the command with a timeout (--command_timeout_ms)
+- running the command from a different directory (--directory)
+- passing the command to `sh -c` so shell metacharacters like && or
+  $() can be used (--shell)
+- running the command in a new tmux window (--tmux_window_name)";
+
 #[derive(Parser, Debug, Clone)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about, long_about=LONG_ABOUT)]
 struct Args {
     /// The name of the tmux window to use.
     #[arg(long = "tmux_window_name")]
@@ -67,7 +75,6 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
     }
 }
 
-#[allow(dead_code)]
 fn make_tmux_command(args: Args) -> Vec<String> {
     let mut full_command = vec![
         "tmux".to_string(),
