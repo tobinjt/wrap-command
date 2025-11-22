@@ -79,6 +79,7 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     let mut full_command = vec![
         "tmux".to_string(),
         "new-window".to_string(),
+        "-d".to_string(),
         "-n".to_string(),
         args.tmux_window_name
             .expect("Internal error: make_tmux_command called without tmux_window_name"),
@@ -214,6 +215,7 @@ mod make_tmux_command {
             vec![
                 "tmux",
                 "new-window",
+                "-d",
                 "-n",
                 "my_window",
                 &current_exe,
@@ -246,6 +248,7 @@ mod make_tmux_command {
             vec![
                 "tmux",
                 "new-window",
+                "-d",
                 "-n",
                 "another_window",
                 &current_exe,
@@ -478,6 +481,7 @@ mod make_command_to_run {
             vec![
                 "tmux",
                 "new-window",
+                "-d",
                 "-n",
                 "my_window",
                 &current_exe,
