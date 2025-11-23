@@ -48,7 +48,7 @@ struct Args {
     #[arg(
         long = "signal",
         requires = "command_timeout_ms",
-        default_value = "SIGINT"
+        default_value = "SIGTERM"
     )]
     signal: Option<String>,
 
@@ -599,7 +599,7 @@ mod clap_test {
             "--command_timeout_ms",
             "456",
             "--signal",
-            "SIGINT",
+            "SIGTERM",
             "--directory",
             "/no/where",
             "--shell",
@@ -611,12 +611,18 @@ mod clap_test {
         assert_eq!(Some("qwerty"), args.lockfile.as_deref());
         assert_eq!(Some(123), args.lock_timeout_ms);
         assert_eq!(Some(456), args.command_timeout_ms);
-        assert_eq!(Some("SIGINT"), args.signal.as_deref());
+        assert_eq!(Some("SIGTERM"), args.signal.as_deref());
         assert_eq!(Some("/no/where"), args.directory.as_deref());
         assert_eq!(
             vec!["echo".to_string(), "foo".to_string(), "bar".to_string()],
             args.command
         );
+    }
+
+    #[test]
+    fn test_parse_args_default_signal() {
+        let args = Args::parse_from(vec!["argv0", "--command_timeout_ms", "100", "echo", "foo"]);
+        assert_eq!(Some("SIGTERM"), args.signal.as_deref());
     }
 
     #[test]
