@@ -1,6 +1,6 @@
 use clap::Parser;
 use fs4::fs_std::FileExt;
-use nix::sys::signal::{Signal, killpg};
+use nix::sys::signal::killpg;
 use nix::unistd::Pid;
 use std::env;
 use std::fs::File;
@@ -44,8 +44,12 @@ struct Args {
     command_timeout_ms: Option<u64>,
 
     /// The signal to send to the command if it times out. Can be a signal name (e.g. "SIGTERM") or a signal number (e.g. "15").
-    /// Defaults to SIGKILL (9) if not specified.
-    #[arg(long = "signal", requires = "command_timeout_ms")]
+    /// Defaults to SIGINT (2) if not specified.
+    #[arg(
+        long = "signal",
+        requires = "command_timeout_ms",
+        default_value = "SIGINT"
+    )]
     signal: Option<String>,
 
     /// The directory to run the command in.
@@ -112,15 +116,35 @@ fn make_tmux_command(args: Args) -> Vec<String> {
             "--command_timeout_ms".to_string(),
             command_timeout_ms.to_string(),
         ]);
-    }
-    if let Some(signal) = args.signal {
-        full_command.extend_from_slice(&["--signal".to_string(), signal]);
+        if let Some(signal) = args.signal {
+            full_command.extend_from_slice(&["--signal".to_string(), signal]);
+        }
     }
     if args.shell {
         full_command.extend_from_slice(&["--shell".to_string()]);
     }
     full_command.extend_from_slice(&args.command);
     full_command
+}
+
+fn kill_child_process_group(
+    child: &mut std::process::Child,
+    signal_name: Option<&str>,
+) -> Result<(), String> {
+    let pgid = Pid::from_raw(child.id() as i32);
+    let signal: nix::sys::signal::Signal = signal_name
+        .expect("internal error: missing signal name")
+        .parse()
+        .map_err(|e| format!("Invalid signal: {e}"))?;
+    println!("signal: {}", signal);
+    // TODO: send SIGINT first to give time for a graceful exit, then send SIGKILL
+    // after 1 second.
+    // I can't test this without causing killpg() to fail, which would require
+    // dependency injection I guess.  Maybe I could inject `Command::new` instead?
+    killpg(pgid, signal).map_err(|e| e.to_string())?;
+    // Likewise, I'd need to inject `Command::new`.
+    child.wait().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn run_command(args: &Args) -> Result<i32, String> {
@@ -142,27 +166,13 @@ fn run_command(args: &Args) -> Result<i32, String> {
 
     let timeout = args.command_timeout_ms.map(Duration::from_millis);
     let exit_status = match timeout {
-        Some(duration) => {
-            match child.wait_timeout(duration).map_err(|e| e.to_string())? {
-                Some(status) => Ok(status),
-                None => {
-                    let pgid = Pid::from_raw(child.id() as i32);
-                    let signal = match args.signal.as_deref() {
-                        Some(s) => s.parse().map_err(|e| format!("Invalid signal: {e}"))?,
-                        None => Signal::SIGKILL,
-                    };
-                    println!("signal: {}", signal);
-                    // TODO: send SIGINT first to give time for a graceful exit, then send SIGKILL
-                    // after 1 second.
-                    // I can't test this without causing killpg() to fail, which would require
-                    // dependency injection I guess.  Maybe I could inject `Command::new` instead?
-                    killpg(pgid, signal).map_err(|e| e.to_string())?;
-                    // Likewise, I'd need to inject `Command::new`.
-                    child.wait().map_err(|e| e.to_string())?;
-                    Err(format!("Command timed out after {duration:?}"))
-                }
+        Some(duration) => match child.wait_timeout(duration).map_err(|e| e.to_string())? {
+            Some(status) => Ok(status),
+            None => {
+                kill_child_process_group(&mut child, args.signal.as_deref())?;
+                Err(format!("Command timed out after {duration:?}"))
             }
-        }
+        },
         // Likewise, I'd need to inject `Command::new`.
         None => child.wait().map_err(|e| e.to_string()),
     }?;
