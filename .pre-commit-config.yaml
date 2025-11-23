@@ -16,8 +16,10 @@ repos:
         args:
           [
             # TODO: improve test coverage.
-            "--fail-uncovered-lines=8",
-            "--fail-uncovered-functions=5",
+            # Debug missing coverage with:
+            # cargo llvm-cov --text --show-missing-lines | rg -B 2 -F -e '^0' -e ' 0|'
+            "--fail-uncovered-lines=10",
+            "--fail-uncovered-functions=7",
             "--quiet",
             "--show-missing-lines",
           ]
