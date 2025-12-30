@@ -72,9 +72,24 @@ struct Args {
     #[arg(long = "shell")]
     shell: bool,
 
+    /// Ping this URL on success, e.g. https://hc-ping.com/....
+    #[arg(long = "success_url")]
+    success_url: Option<String>,
+
+    /// Ping this URL on failure, e.g. https://hc-ping.com/....
+    #[arg(long = "failure_url")]
+    failure_url: Option<String>,
+
     /// The command to run.
     #[arg(trailing_var_arg = true, required = true)]
     command: Vec<String>,
+}
+
+fn ping_url(url: &str) {
+    let client = reqwest::blocking::Client::new();
+    if let Err(e) = client.get(url).send() {
+        eprintln!("Failed to ping URL {}: {}", url, e);
+    }
 }
 
 fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, String> {
@@ -140,6 +155,12 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     }
     if args.shell {
         full_command.extend_from_slice(&["--shell".to_string()]);
+    }
+    if let Some(success_url) = args.success_url {
+        full_command.extend_from_slice(&["--success_url".to_string(), success_url]);
+    }
+    if let Some(failure_url) = args.failure_url {
+        full_command.extend_from_slice(&["--failure_url".to_string(), failure_url]);
     }
     full_command.extend_from_slice(&args.command);
     full_command
@@ -230,6 +251,8 @@ fn make_command_to_run(args: Args) -> Args {
             signal_timeout_ms: 1000,
             directory: None,
             shell: false,
+            success_url: None,
+            failure_url: None,
         }
     } else if args.shell {
         let mut command_with_shell = vec!["sh".to_string(), "-c".to_string()];
@@ -247,9 +270,21 @@ fn realmain(args: Args) -> i32 {
     let args_for_command = make_command_to_run(args);
 
     match run_command(&args_for_command) {
-        Ok(exit_code) => exit_code,
+        Ok(exit_code) => {
+            if exit_code == 0 {
+                if let Some(url) = &args_for_command.success_url {
+                    ping_url(url);
+                }
+            } else if let Some(url) = &args_for_command.failure_url {
+                ping_url(url);
+            }
+            exit_code
+        }
         Err(e) => {
             eprintln!("Error: {}", e);
+            if let Some(url) = &args_for_command.failure_url {
+                ping_url(url);
+            }
             1
         }
     }
@@ -344,6 +379,138 @@ mod make_tmux_command {
     fn test_make_tmux_command_no_window_name() {
         let args = Args::parse_from(vec!["argv0", "echo", "hello"]);
         make_tmux_command(args);
+    }
+
+    #[test]
+    fn test_make_tmux_command_forward_urls() {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name=window",
+            "--success_url=http://success",
+            "--failure_url=http://failure",
+            "echo",
+            "hello",
+        ]);
+        let result = make_tmux_command(args);
+        let current_exe = env::current_exe()
+            .expect("cannot determine current executable")
+            .display()
+            .to_string();
+        assert_eq!(
+            result,
+            vec![
+                "tmux",
+                "new-window",
+                "-d",
+                "-n",
+                "window",
+                &current_exe,
+                "--success_url",
+                "http://success",
+                "--failure_url",
+                "http://failure",
+                "echo",
+                "hello"
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod ping_tests {
+    use super::*;
+    use mockito::Server;
+
+    #[test]
+    fn test_ping_success() {
+        let mut server = Server::new();
+        let expected_request = server.mock("GET", "/success").with_status(200).create();
+
+        let url = format!("{}/success", server.url());
+        let args = Args::parse_from(vec!["argv0", "--success_url", &url, "true"]);
+
+        let result = realmain(args);
+        assert_eq!(result, 0);
+        // Check that the expected request was made.
+        expected_request.assert();
+    }
+
+    #[test]
+    fn test_ping_failure() {
+        let mut server = Server::new();
+        let expected_request = server.mock("GET", "/failure").with_status(200).create();
+
+        let url = format!("{}/failure", server.url());
+        let args = Args::parse_from(vec!["argv0", "--failure_url", &url, "false"]);
+
+        let result = realmain(args);
+        assert_eq!(result, 1);
+        expected_request.assert();
+    }
+
+    #[test]
+    fn test_ping_failure_on_command_error() {
+        // Run a command that doesn't exist to trigger Err() in run_command
+        let mut server = Server::new();
+        let expected_request = server.mock("GET", "/failure").with_status(200).create();
+
+        let url = format!("{}/failure", server.url());
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--failure_url",
+            &url,
+            "command_does_not_exist",
+        ]);
+
+        let result = realmain(args);
+        assert_eq!(result, 1);
+        expected_request.assert();
+    }
+
+    #[test]
+    fn test_success_does_not_trigger_failure_url() {
+        let mut server = Server::new();
+        let m_failure = server.mock("GET", "/failure").expect(0).create();
+        let m_success = server.mock("GET", "/success").with_status(200).create();
+
+        let success_url = format!("{}/success", server.url());
+        let failure_url = format!("{}/failure", server.url());
+
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--success_url",
+            &success_url,
+            "--failure_url",
+            &failure_url,
+            "true",
+        ]);
+        realmain(args);
+
+        m_failure.assert();
+        m_success.assert();
+    }
+
+    #[test]
+    fn test_failure_does_not_trigger_success_url() {
+        let mut server = Server::new();
+        let m_failure = server.mock("GET", "/failure").with_status(200).create();
+        let m_success = server.mock("GET", "/success").expect(0).create();
+
+        let success_url = format!("{}/success", server.url());
+        let failure_url = format!("{}/failure", server.url());
+
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--success_url",
+            &success_url,
+            "--failure_url",
+            &failure_url,
+            "false",
+        ]);
+        realmain(args);
+
+        m_failure.assert();
+        m_success.assert();
     }
 }
 
