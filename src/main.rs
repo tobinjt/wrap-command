@@ -91,8 +91,7 @@ struct Args {
 }
 
 fn ping_url(url: &str) {
-    let client = reqwest::blocking::Client::new();
-    if let Err(e) = client.get(url).send() {
+    if let Err(e) = ureq::get(url).call() {
         eprintln!("Failed to ping URL {}: {}", url, e);
     }
 }
