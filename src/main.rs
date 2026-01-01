@@ -25,6 +25,7 @@ const LONG_ABOUT: &str = "A program that wraps a command, optionally:
 - passing the command to `sh -c` so shell metacharacters like && or
   $() can be used (--shell)
 - running the command in a new tmux window (--tmux_window_name)
+- preventing the system from sleeping (--caffeinate)
 Any combination of unindented flags is supported.  The indented flags
 require the flag they are indented under.";
 
@@ -79,6 +80,10 @@ struct Args {
     /// Ping this URL on failure, e.g. https://hc-ping.com/....
     #[arg(long = "failure_url")]
     failure_url: Option<String>,
+
+    /// Prevent the system from sleeping while the command is running.
+    #[arg(long = "caffeinate")]
+    caffeinate: bool,
 
     /// The command to run.
     #[arg(trailing_var_arg = true, required = true)]
@@ -161,6 +166,9 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     }
     if let Some(failure_url) = args.failure_url {
         full_command.extend_from_slice(&["--failure_url".to_string(), failure_url]);
+    }
+    if args.caffeinate {
+        full_command.extend_from_slice(&["--caffeinate".to_string()]);
     }
     full_command.extend_from_slice(&args.command);
     full_command
@@ -253,16 +261,28 @@ fn make_command_to_run(args: Args) -> Args {
             shell: false,
             success_url: None,
             failure_url: None,
-        }
-    } else if args.shell {
-        let mut command_with_shell = vec!["sh".to_string(), "-c".to_string()];
-        command_with_shell.extend_from_slice(&args.command);
-        Args {
-            command: command_with_shell,
-            ..args.clone()
+            caffeinate: false,
         }
     } else {
-        args.clone()
+        let mut command = args.command.clone();
+        if args.shell {
+            let mut shell_command = vec!["sh".to_string(), "-c".to_string()];
+            shell_command.extend_from_slice(&command);
+            command = shell_command;
+        }
+        if args.caffeinate {
+            let mut caffeinate_command = if cfg!(target_os = "macos") {
+                vec!["caffeinate".to_string(), "-i".to_string()]
+            } else {
+                vec!["systemd-inhibit".to_string(), "--what=idle".to_string()]
+            };
+            caffeinate_command.extend_from_slice(&command);
+            command = caffeinate_command;
+        }
+        Args {
+            command,
+            ..args.clone()
+        }
     }
 }
 
@@ -338,6 +358,7 @@ mod make_tmux_command {
             "--signal=SIGTERM",
             "--signal_timeout_ms=2000",
             "--shell",
+            "--caffeinate",
             "ls",
             "-la",
         ]);
@@ -368,6 +389,7 @@ mod make_tmux_command {
                 "--signal_timeout_ms",
                 "2000",
                 "--shell",
+                "--caffeinate",
                 "ls",
                 "-la"
             ]
@@ -812,6 +834,34 @@ mod make_command_to_run {
             result_args.signal_timeout_ms,
             original_args.signal_timeout_ms
         );
+        assert_eq!(result_args.caffeinate, original_args.caffeinate);
+    }
+
+    #[test]
+    fn test_make_command_to_run_caffeinate() {
+        let args = Args::parse_from(vec!["argv0", "--caffeinate", "echo", "foo"]);
+        let result_args = make_command_to_run(args);
+        let expected_command = if cfg!(target_os = "macos") {
+            vec!["caffeinate", "-i", "echo", "foo"]
+        } else {
+            vec!["systemd-inhibit", "--what=idle", "echo", "foo"]
+        };
+        assert_eq!(result_args.command, expected_command);
+        assert!(result_args.caffeinate);
+    }
+
+    #[test]
+    fn test_make_command_to_run_shell_caffeinate() {
+        let args = Args::parse_from(vec!["argv0", "--shell", "--caffeinate", "echo", "foo"]);
+        let result_args = make_command_to_run(args);
+        let expected_command = if cfg!(target_os = "macos") {
+            vec!["caffeinate", "-i", "sh", "-c", "echo", "foo"]
+        } else {
+            vec!["systemd-inhibit", "--what=idle", "sh", "-c", "echo", "foo"]
+        };
+        assert_eq!(result_args.command, expected_command);
+        assert!(result_args.caffeinate);
+        assert!(result_args.shell);
     }
 }
 
