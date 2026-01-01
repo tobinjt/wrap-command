@@ -618,6 +618,19 @@ mod ping_tests {
         m_failure.assert();
         m_success.assert();
     }
+
+    #[test]
+    fn test_ping_url_error() {
+        let mut server = Server::new();
+        let expected_request = server.mock("GET", "/failure").with_status(500).create();
+
+        let url = format!("{}/failure", server.url());
+        let args = Args::parse_from(vec!["argv0", "--failure_url", &url, "false"]);
+
+        let result = realmain(args);
+        assert_eq!(result, 1);
+        expected_request.assert();
+    }
 }
 
 #[cfg(test)]
