@@ -10,6 +10,15 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 use wait_timeout::ChildExt;
 
+#[cfg(target_os = "macos")]
+const CAFFEINATE_CMD: &[&str] = &["caffeinate", "-i"];
+
+#[cfg(target_os = "linux")]
+const CAFFEINATE_CMD: &[&str] = &["systemd-inhibit", "--what=idle"];
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+compile_error!("wrap-command only supports MacOS and Linux");
+
 const LONG_ABOUT: &str = "A program that wraps a command, optionally:
 - using a lock to ensure only one instance is running (--lockfile)
   - either failing immediately if the lock is held or waiting for a
@@ -26,6 +35,9 @@ const LONG_ABOUT: &str = "A program that wraps a command, optionally:
   $() can be used (--shell)
 - running the command in a new tmux window (--tmux_window_name)
 - preventing the system from sleeping (--caffeinate)
+- waiting for network connectivity (--network_check_timeout_ms)
+  - waits for http://clients3.google.com/generate_204 to be reachable.
+  - 0 means wait forever, >0 means timeout after that many ms.
 Any combination of unindented flags is supported.  The indented flags
 require the flag they are indented under.";
 
@@ -84,6 +96,19 @@ struct Args {
     /// Prevent the system from sleeping while the command is running.
     #[arg(long = "caffeinate")]
     caffeinate: bool,
+
+    /// Wait for network connectivity before running the command.
+    /// 0: wait forever. >0: timeout in ms.
+    #[arg(long = "network_check_timeout_ms")]
+    network_check_timeout_ms: Option<u64>,
+
+    /// URL to check for network connectivity.
+    #[arg(
+        long = "network_check_url",
+        hide = true,
+        default_value = "http://clients3.google.com/generate_204"
+    )]
+    network_check_url: String,
 
     /// The command to run.
     #[arg(trailing_var_arg = true, required = true)]
@@ -169,8 +194,32 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     if args.caffeinate {
         full_command.extend_from_slice(&["--caffeinate".to_string()]);
     }
+    if let Some(network_check_timeout_ms) = args.network_check_timeout_ms {
+        full_command.extend_from_slice(&[
+            "--network_check_timeout_ms".to_string(),
+            network_check_timeout_ms.to_string(),
+        ]);
+    }
+    if args.network_check_url != "http://clients3.google.com/generate_204" {
+        full_command.extend_from_slice(&[
+            "--network_check_url".to_string(),
+            args.network_check_url.clone(),
+        ]);
+    }
     full_command.extend_from_slice(&args.command);
     full_command
+}
+
+fn check_network_connectivity(url: &str, timeout_ms: u64) -> Result<(), String> {
+    let mut builder = ureq::config::Config::builder();
+    if timeout_ms > 0 {
+        builder = builder.timeout_global(Some(Duration::from_millis(timeout_ms)));
+    }
+    let agent = builder.build().new_agent();
+    match agent.head(url).call() {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Network check failed for {}: {}", url, e)),
+    }
 }
 
 fn kill_child_process_group(
@@ -212,6 +261,10 @@ fn run_command(args: &Args) -> Result<i32, String> {
     } else {
         None
     };
+
+    if let Some(timeout_ms) = args.network_check_timeout_ms {
+        check_network_connectivity(&args.network_check_url, timeout_ms)?;
+    }
 
     let mut child_command = Command::new(&args.command[0]);
     child_command.args(&args.command[1..]);
@@ -261,6 +314,8 @@ fn make_command_to_run(args: Args) -> Args {
             success_url: None,
             failure_url: None,
             caffeinate: false,
+            network_check_timeout_ms: None,
+            network_check_url: "http://clients3.google.com/generate_204".to_string(),
         }
     } else {
         let mut command = args.command.clone();
@@ -270,11 +325,10 @@ fn make_command_to_run(args: Args) -> Args {
             command = shell_command;
         }
         if args.caffeinate {
-            let mut caffeinate_command = if cfg!(target_os = "macos") {
-                vec!["caffeinate".to_string(), "-i".to_string()]
-            } else {
-                vec!["systemd-inhibit".to_string(), "--what=idle".to_string()]
-            };
+            let mut caffeinate_command = CAFFEINATE_CMD
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>();
             caffeinate_command.extend_from_slice(&command);
             command = caffeinate_command;
         }
@@ -768,6 +822,7 @@ mod lock_file {
 #[cfg(test)]
 mod make_command_to_run {
     use super::*;
+    use mockito::Server;
 
     #[test]
     fn test_make_command_to_run_tmux() {
@@ -805,6 +860,66 @@ mod make_command_to_run {
         assert!(result_args.directory.is_none());
         assert_eq!(1000, result_args.signal_timeout_ms);
         assert!(!result_args.shell);
+        assert!(result_args.network_check_timeout_ms.is_none());
+    }
+
+    #[test]
+    fn test_make_command_to_run_network_check() {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--network_check_timeout_ms=500",
+            "--network_check_url=http://example.com",
+            "true",
+        ]);
+        let result_args = make_command_to_run(args);
+        assert_eq!(result_args.network_check_timeout_ms, Some(500));
+        assert_eq!(result_args.network_check_url, "http://example.com");
+    }
+
+    #[test]
+    fn test_network_check_timeout() {
+        // Create a listener that accepts a connection but sends nothing, forcing a timeout
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = format!("http://127.0.0.1:{}", port);
+
+        std::thread::spawn(move || {
+            // Accept the connection and sleep to force the client to timeout
+            if let Ok((_stream, _)) = listener.accept() {
+                std::thread::sleep(Duration::from_secs(2));
+            }
+        });
+
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--network_check_timeout_ms=100",
+            "--network_check_url",
+            &url,
+            "true",
+        ]);
+
+        let result = run_command(&args);
+        assert!(result.is_err());
+        // Verify it failed due to network check
+        assert!(result.unwrap_err().contains("Network check failed"));
+    }
+
+    #[test]
+    fn test_network_check_success() {
+        let mut server = Server::new();
+        let _m = server.mock("HEAD", "/").with_status(200).create();
+
+        let url = server.url();
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--network_check_timeout_ms=500",
+            "--network_check_url",
+            &url,
+            "true",
+        ]);
+
+        let result = run_command(&args);
+        assert_eq!(result.unwrap(), 0);
     }
 
     #[test]
@@ -840,11 +955,11 @@ mod make_command_to_run {
     fn test_make_command_to_run_caffeinate() {
         let args = Args::parse_from(vec!["argv0", "--caffeinate", "echo", "foo"]);
         let result_args = make_command_to_run(args);
-        let expected_command = if cfg!(target_os = "macos") {
-            vec!["caffeinate", "-i", "echo", "foo"]
-        } else {
-            vec!["systemd-inhibit", "--what=idle", "echo", "foo"]
-        };
+        let mut expected_command = CAFFEINATE_CMD
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>();
+        expected_command.extend_from_slice(&["echo".to_string(), "foo".to_string()]);
         assert_eq!(result_args.command, expected_command);
         assert!(result_args.caffeinate);
     }
@@ -853,11 +968,16 @@ mod make_command_to_run {
     fn test_make_command_to_run_shell_caffeinate() {
         let args = Args::parse_from(vec!["argv0", "--shell", "--caffeinate", "echo", "foo"]);
         let result_args = make_command_to_run(args);
-        let expected_command = if cfg!(target_os = "macos") {
-            vec!["caffeinate", "-i", "sh", "-c", "echo", "foo"]
-        } else {
-            vec!["systemd-inhibit", "--what=idle", "sh", "-c", "echo", "foo"]
-        };
+        let mut expected_command = CAFFEINATE_CMD
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>();
+        expected_command.extend_from_slice(&[
+            "sh".to_string(),
+            "-c".to_string(),
+            "echo".to_string(),
+            "foo".to_string(),
+        ]);
         assert_eq!(result_args.command, expected_command);
         assert!(result_args.caffeinate);
         assert!(result_args.shell);
