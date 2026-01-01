@@ -683,6 +683,24 @@ mod realmain {
         let result = realmain(Args::parse_from(vec!["argv0", "--shell", "kill -9 $$"]));
         assert_eq!(result, 1);
     }
+
+    #[test]
+    fn test_realmain_fail_no_url() {
+        let result = realmain(Args::parse_from(vec!["argv0", "false"]));
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn test_realmain_error_no_url() {
+        let result = realmain(Args::parse_from(vec!["argv0", "command_does_not_exist"]));
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn test_realmain_success_no_url() {
+        let result = realmain(Args::parse_from(vec!["argv0", "true"]));
+        assert_eq!(result, 0);
+    }
 }
 
 #[cfg(test)]
@@ -835,6 +853,7 @@ mod lock_file {
     use super::*;
     use std::env;
     use std::thread;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_lock_file_timeout() {
@@ -860,6 +879,28 @@ mod lock_file {
         let lock_result = lock_file(Path::new("/dev/fd"), Duration::from_secs(1));
         assert!(lock_result.is_err());
         assert!(lock_result.unwrap_err().contains("Is a directory"));
+    }
+
+    #[test]
+    fn test_lock_file_retry() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let lock_path = temp_file.path().to_owned();
+
+        // Lock the file in the current thread first
+        let lock1 = File::create(&lock_path).unwrap();
+        lock1.lock_exclusive().unwrap();
+
+        let start = Instant::now();
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                std::thread::sleep(Duration::from_millis(500));
+                drop(lock1);
+            });
+
+            let lock2 = lock_file(&lock_path, Duration::from_secs(2)).unwrap();
+            assert!(start.elapsed() >= Duration::from_millis(500));
+            drop(lock2);
+        });
     }
 }
 
@@ -957,6 +998,24 @@ mod make_command_to_run {
         let args = Args::parse_from(vec![
             "argv0",
             "--network_check_timeout_ms=500",
+            "--network_check_url",
+            &url,
+            "true",
+        ]);
+
+        let result = run_command(&args);
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_network_check_timeout_zero() {
+        let mut server = Server::new();
+        let _m = server.mock("HEAD", "/").with_status(200).create();
+
+        let url = server.url();
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--network_check_timeout_ms=0",
             "--network_check_url",
             &url,
             "true",
