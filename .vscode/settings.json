@@ -1,0 +1,15 @@
+{
+  // Check all targets (Tests, Examples, Bins, Benchmarks).
+  "rust-analyzer.check.allTargets": true,
+
+  // Activate all feature flags (prevents "inactive code" greying out when it's
+  // caused by feature flags).
+  "rust-analyzer.cargo.features": "all",
+
+  // Force clippy instead of cargo check for better lints
+  "rust-analyzer.check.command": "clippy",
+
+  // Disable warnings about inactive code, they are triggered by having
+  // OS-specific code.
+  "rust-analyzer.diagnostics.disabled": ["inactive-code"]
+}
