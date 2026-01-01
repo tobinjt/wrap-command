@@ -489,6 +489,37 @@ mod make_tmux_command {
             ]
         );
     }
+
+    #[test]
+    fn test_make_tmux_command_custom_network_check_url() {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name=window",
+            "--network_check_url=http://custom.url",
+            "echo",
+            "hello",
+        ]);
+        let result = make_tmux_command(args);
+        let current_exe = env::current_exe()
+            .expect("cannot determine current executable")
+            .display()
+            .to_string();
+        assert_eq!(
+            result,
+            vec![
+                "tmux",
+                "new-window",
+                "-d",
+                "-n",
+                "window",
+                &current_exe,
+                "--network_check_url",
+                "http://custom.url",
+                "echo",
+                "hello"
+            ]
+        );
+    }
 }
 
 #[cfg(test)]
