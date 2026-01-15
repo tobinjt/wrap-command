@@ -93,6 +93,14 @@ struct Args {
     #[arg(long = "failure_url")]
     failure_url: Option<String>,
 
+    /// Delay between retries when pinging success/failure URLs in milliseconds.
+    #[arg(long = "url_retry_delay_ms", default_value_t = 1000)]
+    url_retry_delay_ms: u64,
+
+    /// Number of retries when pinging success/failure URLs.
+    #[arg(long = "url_retry_count", default_value_t = 5)]
+    url_retry_count: u32,
+
     /// Prevent the system from sleeping while the command is running.
     #[arg(long = "caffeinate")]
     caffeinate: bool,
@@ -115,9 +123,23 @@ struct Args {
     command: Vec<String>,
 }
 
-fn ping_url(url: &str) {
-    if let Err(e) = ureq::get(url).call() {
-        eprintln!("Failed to ping URL {}: {}", url, e);
+fn ping_url(url: &str, retry_count: u32, retry_delay_ms: u64) {
+    let mut attempts = 0;
+    loop {
+        match ureq::get(url).call() {
+            Ok(_) => break,
+            Err(e) => {
+                if attempts >= retry_count {
+                    eprintln!(
+                        "Failed to ping URL {} after {} retries: {}",
+                        url, retry_count, e
+                    );
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(retry_delay_ms));
+                attempts += 1;
+            }
+        }
     }
 }
 
@@ -190,6 +212,18 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     }
     if let Some(failure_url) = args.failure_url {
         full_command.extend_from_slice(&["--failure_url".to_string(), failure_url]);
+    }
+    if args.url_retry_delay_ms != 1000 {
+        full_command.extend_from_slice(&[
+            "--url_retry_delay_ms".to_string(),
+            args.url_retry_delay_ms.to_string(),
+        ]);
+    }
+    if args.url_retry_count != 5 {
+        full_command.extend_from_slice(&[
+            "--url_retry_count".to_string(),
+            args.url_retry_count.to_string(),
+        ]);
     }
     if args.caffeinate {
         full_command.extend_from_slice(&["--caffeinate".to_string()]);
@@ -316,6 +350,8 @@ fn make_command_to_run(args: Args) -> Args {
             caffeinate: false,
             network_check_timeout_ms: None,
             network_check_url: "http://clients3.google.com/generate_204".to_string(),
+            url_retry_delay_ms: 1000,
+            url_retry_count: 5,
         }
     } else {
         let mut command = args.command.clone();
@@ -346,17 +382,29 @@ fn realmain(args: Args) -> i32 {
         Ok(exit_code) => {
             if exit_code == 0 {
                 if let Some(url) = &args_for_command.success_url {
-                    ping_url(url);
+                    ping_url(
+                        url,
+                        args_for_command.url_retry_count,
+                        args_for_command.url_retry_delay_ms,
+                    );
                 }
             } else if let Some(url) = &args_for_command.failure_url {
-                ping_url(url);
+                ping_url(
+                    url,
+                    args_for_command.url_retry_count,
+                    args_for_command.url_retry_delay_ms,
+                );
             }
             exit_code
         }
         Err(e) => {
             eprintln!("Error: {}", e);
             if let Some(url) = &args_for_command.failure_url {
-                ping_url(url);
+                ping_url(
+                    url,
+                    args_for_command.url_retry_count,
+                    args_for_command.url_retry_delay_ms,
+                );
             }
             1
         }
@@ -412,6 +460,8 @@ mod make_tmux_command {
             "--signal_timeout_ms=2000",
             "--shell",
             "--caffeinate",
+            "--url_retry_delay_ms=2000",
+            "--url_retry_count=10",
             "ls",
             "-la",
         ]);
@@ -442,6 +492,10 @@ mod make_tmux_command {
                 "--signal_timeout_ms",
                 "2000",
                 "--shell",
+                "--url_retry_delay_ms",
+                "2000",
+                "--url_retry_count",
+                "10",
                 "--caffeinate",
                 "ls",
                 "-la"
@@ -622,10 +676,21 @@ mod ping_tests {
     #[test]
     fn test_ping_url_error() {
         let mut server = Server::new();
-        let expected_request = server.mock("GET", "/failure").with_status(500).create();
+        let expected_request = server
+            .mock("GET", "/failure")
+            .with_status(500)
+            .expect(6)
+            .create();
 
         let url = format!("{}/failure", server.url());
-        let args = Args::parse_from(vec!["argv0", "--failure_url", &url, "false"]);
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--failure_url",
+            &url,
+            "--url_retry_delay_ms",
+            "0",
+            "false",
+        ]);
 
         let result = realmain(args);
         assert_eq!(result, 1);
@@ -946,6 +1011,8 @@ mod make_command_to_run {
         assert_eq!(1000, result_args.signal_timeout_ms);
         assert!(!result_args.shell);
         assert!(result_args.network_check_timeout_ms.is_none());
+        assert_eq!(1000, result_args.url_retry_delay_ms);
+        assert_eq!(5, result_args.url_retry_count);
     }
 
     #[test]
@@ -1103,6 +1170,8 @@ mod clap_test {
         let args = Args::parse_from(vec!["argv0", "echo"]);
         assert_eq!(vec!["echo".to_string()], args.command);
         assert!(!args.shell);
+        assert_eq!(1000, args.url_retry_delay_ms);
+        assert_eq!(5, args.url_retry_count);
 
         let args = Args::parse_from(vec![
             "argv0",
@@ -1121,6 +1190,10 @@ mod clap_test {
             "--directory",
             "/no/where",
             "--shell",
+            "--url_retry_delay_ms",
+            "2000",
+            "--url_retry_count",
+            "10",
             "echo",
             "foo",
             "bar",
@@ -1132,6 +1205,8 @@ mod clap_test {
         assert_eq!(Some("SIGTERM"), args.signal.as_deref());
         assert_eq!(789, args.signal_timeout_ms);
         assert_eq!(Some("/no/where"), args.directory.as_deref());
+        assert_eq!(2000, args.url_retry_delay_ms);
+        assert_eq!(10, args.url_retry_count);
         assert_eq!(
             vec!["echo".to_string(), "foo".to_string(), "bar".to_string()],
             args.command
