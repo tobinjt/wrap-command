@@ -1,9 +1,11 @@
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::{Shell, generate};
 use fs4::fs_std::FileExt;
 use nix::sys::signal::killpg;
 use nix::unistd::Pid;
 use std::env;
 use std::fs::File;
+use std::io;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
@@ -118,8 +120,15 @@ struct Args {
     )]
     network_check_url: String,
 
+    /// Output shell completion code for the specified shell.
+    #[arg(long = "output_shell_completion")]
+    output_shell_completion: Option<Shell>,
+
     /// The command to run.
-    #[arg(trailing_var_arg = true, required = true)]
+    #[arg(
+        trailing_var_arg = true,
+        required_unless_present = "output_shell_completion"
+    )]
     command: Vec<String>,
 }
 
@@ -352,6 +361,7 @@ fn make_command_to_run(args: Args) -> Args {
             network_check_url: "http://clients3.google.com/generate_204".to_string(),
             url_retry_delay_ms: 1000,
             url_retry_count: 5,
+            output_shell_completion: None,
         }
     } else {
         let mut command = args.command.clone();
@@ -376,6 +386,14 @@ fn make_command_to_run(args: Args) -> Args {
 }
 
 fn realmain(args: Args) -> i32 {
+    realmain_impl(args, &mut io::stdout())
+}
+
+fn realmain_impl<W: io::Write>(args: Args, writer: &mut W) -> i32 {
+    if let Some(shell) = args.output_shell_completion {
+        generate(shell, &mut Args::command(), "wrap-command", writer);
+        return 0;
+    }
     let args_for_command = make_command_to_run(args);
 
     match run_command(&args_for_command) {
@@ -765,6 +783,18 @@ mod realmain {
     fn test_realmain_success_no_url() {
         let result = realmain(Args::parse_from(vec!["argv0", "true"]));
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn test_realmain_output_shell_completion() {
+        let mut buffer = Vec::new();
+        let result = realmain_impl(
+            Args::parse_from(vec!["argv0", "--output_shell_completion", "bash"]),
+            &mut buffer,
+        );
+        assert_eq!(result, 0);
+        let output = String::from_utf8(buffer).unwrap();
+        assert!(output.contains("_wrap-command"));
     }
 }
 
