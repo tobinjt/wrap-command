@@ -57,6 +57,16 @@ jobs:
           cp README.md staging/ || true
           cp LICENSE staging/ || true
 
+          # 1.1 Generate shell completions
+          mkdir -p staging/completions
+          BIN="target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}"
+
+          $BIN --output_shell_completion bash       > staging/completions/wrap-command.bash
+          $BIN --output_shell_completion elvish     > staging/completions/wrap-command.elv
+          $BIN --output_shell_completion fish       > staging/completions/wrap-command.fish
+          $BIN --output_shell_completion powershell > staging/completions/_wrap-command.ps1
+          $BIN --output_shell_completion zsh        > staging/completions/_wrap-command
+
           # 2. Create the UNVERSIONED archive (e.g., wrap-command-linux-x86_64.tar.gz)
           cd staging
           tar czvf ../${{ matrix.platform.name }} *
