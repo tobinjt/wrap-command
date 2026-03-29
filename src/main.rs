@@ -40,12 +40,17 @@ const LONG_ABOUT: &str = "A program that wraps a command, optionally:
 - waiting for network connectivity (--network_check_timeout_ms)
   - waits for http://clients3.google.com/generate_204 to be reachable.
   - 0 means wait forever, >0 means timeout after that many ms.
+- waiting for the user to press enter after the command has finished (--wait)
 Any combination of unindented flags is supported.  The indented flags
 require the flag they are indented under.";
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about=LONG_ABOUT)]
 struct Args {
+    /// Wait for the user to press enter after the command has finished.
+    #[arg(long = "wait")]
+    wait: bool,
+
     /// The name of the tmux window to use.
     #[arg(long = "tmux_window_name")]
     tmux_window_name: Option<String>,
@@ -237,6 +242,9 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     if args.caffeinate {
         full_command.extend_from_slice(&["--caffeinate".to_string()]);
     }
+    if args.wait {
+        full_command.extend_from_slice(&["--wait".to_string()]);
+    }
     if let Some(network_check_timeout_ms) = args.network_check_timeout_ms {
         full_command.extend_from_slice(&[
             "--network_check_timeout_ms".to_string(),
@@ -346,6 +354,7 @@ fn make_command_to_run(args: Args) -> Args {
     if args.tmux_window_name.is_some() {
         Args {
             command: make_tmux_command(args),
+            wait: false,
             tmux_window_name: None,
             lockfile: None,
             lock_timeout_ms: None,
@@ -386,17 +395,17 @@ fn make_command_to_run(args: Args) -> Args {
 }
 
 fn realmain(args: Args) -> i32 {
-    realmain_impl(args, &mut io::stdout())
+    realmain_impl(args, &mut io::stdin().lock(), &mut io::stdout())
 }
 
-fn realmain_impl<W: io::Write>(args: Args, writer: &mut W) -> i32 {
+fn realmain_impl<R: io::BufRead, W: io::Write>(args: Args, reader: &mut R, writer: &mut W) -> i32 {
     if let Some(shell) = args.output_shell_completion {
         generate(shell, &mut Args::command(), "wrap-command", writer);
         return 0;
     }
     let args_for_command = make_command_to_run(args);
 
-    match run_command(&args_for_command) {
+    let exit_code = match run_command(&args_for_command) {
         Ok(exit_code) => {
             if exit_code == 0 {
                 if let Some(url) = &args_for_command.success_url {
@@ -426,9 +435,16 @@ fn realmain_impl<W: io::Write>(args: Args, writer: &mut W) -> i32 {
             }
             1
         }
-    }
-}
+    };
 
+    if args_for_command.wait {
+        writeln!(writer, "Press Enter to continue...").unwrap();
+        let mut _input = String::new();
+        let _ = reader.read_line(&mut _input);
+    }
+
+    exit_code
+}
 fn main() {
     std::process::exit(realmain(Args::parse()))
 }
@@ -517,6 +533,36 @@ mod make_tmux_command {
                 "--caffeinate",
                 "ls",
                 "-la"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_make_tmux_command_wait() {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name=window",
+            "--wait",
+            "echo",
+            "hello",
+        ]);
+        let result = make_tmux_command(args);
+        let current_exe = env::current_exe()
+            .expect("cannot determine current executable")
+            .display()
+            .to_string();
+        assert_eq!(
+            result,
+            vec![
+                "tmux",
+                "new-window",
+                "-d",
+                "-n",
+                "window",
+                &current_exe,
+                "--wait",
+                "echo",
+                "hello"
             ]
         );
     }
@@ -788,13 +834,30 @@ mod realmain {
     #[test]
     fn test_realmain_output_shell_completion() {
         let mut buffer = Vec::new();
+        let mut reader = std::io::Cursor::new(Vec::new());
         let result = realmain_impl(
             Args::parse_from(vec!["argv0", "--output_shell_completion", "bash"]),
+            &mut reader,
             &mut buffer,
         );
         assert_eq!(result, 0);
         let output = String::from_utf8(buffer).unwrap();
         assert!(output.contains("_wrap-command"));
+    }
+
+    #[test]
+    fn test_realmain_wait() {
+        let mut buffer = Vec::new();
+        let mut reader = std::io::Cursor::new(b"\n");
+        let result = realmain_impl(
+            Args::parse_from(vec!["argv0", "--wait", "echo", "foo"]),
+            &mut reader,
+            &mut buffer,
+        );
+        assert_eq!(result, 0);
+        let output = String::from_utf8(buffer).unwrap();
+        assert!(output.contains("Press Enter to continue..."));
+        assert_eq!(reader.position(), 1);
     }
 }
 
@@ -1241,6 +1304,13 @@ mod clap_test {
             vec!["echo".to_string(), "foo".to_string(), "bar".to_string()],
             args.command
         );
+    }
+
+    #[test]
+    fn parse_args_wait() {
+        let args = Args::parse_from(vec!["argv0", "--wait", "echo"]);
+        assert!(args.wait);
+        assert_eq!(vec!["echo".to_string()], args.command);
     }
 
     #[test]
