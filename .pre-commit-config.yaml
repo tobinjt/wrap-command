@@ -24,6 +24,7 @@ repos:
             "--show-missing-lines",
           ]
       - id: cargo-test
+      - id: check-tag-version
   - repo: meta
     hooks:
       - id: check-hooks-apply
