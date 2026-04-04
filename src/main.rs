@@ -768,7 +768,10 @@ mod realmain {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_realmain() {
+    fn test_realmain_with_tmux_window_name() {
+        if env::var("TMUX").is_err() {
+            return;
+        }
         let temp_file = NamedTempFile::new().unwrap();
         let result = realmain(Args::parse_from(vec![
             "argv0",
