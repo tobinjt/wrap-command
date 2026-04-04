@@ -1,5 +1,5 @@
-#!/usr/bin/env -S make_rust_github_workflow wrap-command --output_shell_completion
-name: CI and Release
+#!/usr/bin/env -S make_rust_github_workflow --output_shell_completion wrap-command
+name: Publish to crates.io if tests pass.
 
 on:
   push:
