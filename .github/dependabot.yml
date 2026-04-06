@@ -5,7 +5,18 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
+    # Group updates to reduce PR noise
+    groups:
+      cargo-dependencies:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "rust"
