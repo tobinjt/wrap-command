@@ -8,6 +8,20 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Group updates to reduce PR noise
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "go"
+    # Ensure it updates the go.sum file correctly
+    versioning-strategy: increase
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
