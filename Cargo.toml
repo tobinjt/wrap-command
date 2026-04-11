@@ -14,7 +14,7 @@ repository = "https://github.com/tobinjt/wrap-command"
 
 [dependencies]
 clap = { version = "4.5.49", features = ["derive"] }
-clap_complete = "4.5"
+clap_complete = "4.6"
 fs4 = "0.13.1"
 nix = { version = "0.31.2", features = ["signal"] }
 wait-timeout = "0.2.0"
