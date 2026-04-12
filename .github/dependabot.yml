@@ -1,4 +1,4 @@
-#!/usr/bin/env -S make_rust_github_workflow --output_shell_completion wrap-command
+#!/usr/bin/env -S make_rust_github_workflow wrap-command
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -8,6 +8,8 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
@@ -22,6 +24,8 @@ updates:
       - "go"
     # Ensure it updates the go.sum file correctly
     versioning-strategy: increase
+    cooldown:
+      default-days: 7
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
@@ -34,3 +38,5 @@ updates:
     labels:
       - "dependencies"
       - "rust"
+    cooldown:
+      default-days: 7
