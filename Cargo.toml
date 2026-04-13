@@ -13,13 +13,13 @@ repository = "https://github.com/tobinjt/wrap-command"
 # keep-sorted end
 
 [dependencies]
-clap = { version = "4.5.49", features = ["derive"] }
-clap_complete = "4.5"
+clap = { version = "4.6.0", features = ["derive"] }
+clap_complete = "4.6"
 fs4 = "0.13.1"
 nix = { version = "0.31.2", features = ["signal"] }
-wait-timeout = "0.2.0"
-ureq = "3.1.4"
+wait-timeout = "0.2.1"
+ureq = "3.3.0"
 
 [dev-dependencies]
-tempfile = "3.10.1"
-mockito = "1.4"
+tempfile = "3.27.0"
+mockito = "1.7"
