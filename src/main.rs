@@ -748,6 +748,29 @@ mod ping_tests {
         assert_eq!(result, 1);
         expected_request.assert();
     }
+
+    #[test]
+    fn test_ping_url_success_first_try() {
+        let mut server = Server::new();
+        let expected_request = server.mock("GET", "/success_first").with_status(200).expect(1).create();
+        let url = format!("{}/success_first", server.url());
+
+        ping_url(&url, 2, 0);
+
+        expected_request.assert();
+    }
+
+    #[test]
+    fn test_ping_url_exhausts_retries() {
+        let mut server = Server::new();
+        // retry_count = 2 means it will try 1 + 2 = 3 times
+        let expected_request = server.mock("GET", "/exhausts").with_status(500).expect(3).create();
+        let url = format!("{}/exhausts", server.url());
+
+        ping_url(&url, 2, 0);
+
+        expected_request.assert();
+    }
 }
 
 #[cfg(test)]
