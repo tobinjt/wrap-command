@@ -181,83 +181,79 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
 }
 
 fn make_tmux_command(args: Args) -> Vec<String> {
-    let mut full_command = vec![
-        "tmux".to_string(),
-        "new-window".to_string(),
-        "-d".to_string(),
-        "-n".to_string(),
+    let mut full_command = Vec::with_capacity(args.command.len() + 33);
+    full_command.push("tmux".to_string());
+    full_command.push("new-window".to_string());
+    full_command.push("-d".to_string());
+    full_command.push("-n".to_string());
+    full_command.push(
         args.tmux_window_name
             .expect("Internal error: make_tmux_command called without tmux_window_name"),
+    );
+    full_command.push(
         env::current_exe()
             .expect("cannot determine current executable")
             .display()
             .to_string(),
-    ];
+    );
+
     if let Some(directory) = args.directory {
-        full_command.extend_from_slice(&["--directory".to_string(), directory.to_string()]);
+        full_command.push("--directory".to_string());
+        full_command.push(directory);
     }
     if let Some(lockfile) = args.lockfile {
-        full_command.extend_from_slice(&["--lockfile".to_string(), lockfile.to_string()]);
+        full_command.push("--lockfile".to_string());
+        full_command.push(lockfile);
     }
     if let Some(lock_timeout_ms) = args.lock_timeout_ms {
-        full_command
-            .extend_from_slice(&["--lock_timeout_ms".to_string(), lock_timeout_ms.to_string()]);
+        full_command.push("--lock_timeout_ms".to_string());
+        full_command.push(lock_timeout_ms.to_string());
     }
     if let Some(command_timeout_ms) = args.command_timeout_ms {
-        full_command.extend_from_slice(&[
-            "--command_timeout_ms".to_string(),
-            command_timeout_ms.to_string(),
-        ]);
-        full_command.extend_from_slice(&[
-            "--signal".to_string(),
+        full_command.push("--command_timeout_ms".to_string());
+        full_command.push(command_timeout_ms.to_string());
+        full_command.push("--signal".to_string());
+        full_command.push(
             args.signal
                 .expect("Internal error: signal argument should always be set"),
-        ]);
-        full_command.extend_from_slice(&[
-            "--signal_timeout_ms".to_string(),
-            args.signal_timeout_ms.to_string(),
-        ]);
+        );
+        full_command.push("--signal_timeout_ms".to_string());
+        full_command.push(args.signal_timeout_ms.to_string());
     }
     if args.shell {
-        full_command.extend_from_slice(&["--shell".to_string()]);
+        full_command.push("--shell".to_string());
     }
     if let Some(success_url) = args.success_url {
-        full_command.extend_from_slice(&["--success_url".to_string(), success_url]);
+        full_command.push("--success_url".to_string());
+        full_command.push(success_url);
     }
     if let Some(failure_url) = args.failure_url {
-        full_command.extend_from_slice(&["--failure_url".to_string(), failure_url]);
+        full_command.push("--failure_url".to_string());
+        full_command.push(failure_url);
     }
     if args.url_retry_delay_ms != 1000 {
-        full_command.extend_from_slice(&[
-            "--url_retry_delay_ms".to_string(),
-            args.url_retry_delay_ms.to_string(),
-        ]);
+        full_command.push("--url_retry_delay_ms".to_string());
+        full_command.push(args.url_retry_delay_ms.to_string());
     }
     if args.url_retry_count != 5 {
-        full_command.extend_from_slice(&[
-            "--url_retry_count".to_string(),
-            args.url_retry_count.to_string(),
-        ]);
+        full_command.push("--url_retry_count".to_string());
+        full_command.push(args.url_retry_count.to_string());
     }
     if args.caffeinate {
-        full_command.extend_from_slice(&["--caffeinate".to_string()]);
+        full_command.push("--caffeinate".to_string());
     }
     if args.wait {
-        full_command.extend_from_slice(&["--wait".to_string()]);
+        full_command.push("--wait".to_string());
     }
     if let Some(network_check_timeout_ms) = args.network_check_timeout_ms {
-        full_command.extend_from_slice(&[
-            "--network_check_timeout_ms".to_string(),
-            network_check_timeout_ms.to_string(),
-        ]);
+        full_command.push("--network_check_timeout_ms".to_string());
+        full_command.push(network_check_timeout_ms.to_string());
     }
     if args.network_check_url != "http://clients3.google.com/generate_204" {
-        full_command.extend_from_slice(&[
-            "--network_check_url".to_string(),
-            args.network_check_url.clone(),
-        ]);
+        full_command.push("--network_check_url".to_string());
+        full_command.push(args.network_check_url);
     }
-    full_command.extend_from_slice(&args.command);
+    full_command.extend(args.command);
     full_command
 }
 
@@ -373,24 +369,21 @@ fn make_command_to_run(args: Args) -> Args {
             output_shell_completion: None,
         }
     } else {
-        let mut command = args.command.clone();
+        let mut command = args.command;
         if args.shell {
-            let mut shell_command = vec!["sh".to_string(), "-c".to_string()];
-            shell_command.extend_from_slice(&command);
+            let mut shell_command = Vec::with_capacity(command.len() + 2);
+            shell_command.push("sh".to_string());
+            shell_command.push("-c".to_string());
+            shell_command.extend(command);
             command = shell_command;
         }
         if args.caffeinate {
-            let mut caffeinate_command = CAFFEINATE_CMD
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>();
-            caffeinate_command.extend_from_slice(&command);
+            let mut caffeinate_command = Vec::with_capacity(command.len() + CAFFEINATE_CMD.len());
+            caffeinate_command.extend(CAFFEINATE_CMD.iter().map(|s| s.to_string()));
+            caffeinate_command.extend(command);
             command = caffeinate_command;
         }
-        Args {
-            command,
-            ..args.clone()
-        }
+        Args { command, ..args }
     }
 }
 
