@@ -438,7 +438,7 @@ fn realmain_impl<R: io::BufRead, W: io::Write>(args: Args, reader: &mut R, write
     };
 
     if args_for_command.wait {
-        writeln!(writer, "Press Enter to continue...").unwrap();
+        let _ = writeln!(writer, "Press Enter to continue...");
         let mut _input = String::new();
         let _ = reader.read_line(&mut _input);
     }
