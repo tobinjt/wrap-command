@@ -404,36 +404,26 @@ fn realmain_impl<R: io::BufRead, W: io::Write>(args: Args, reader: &mut R, write
     let args_for_command = make_command_to_run(args);
 
     let exit_code = match run_command(&args_for_command) {
-        Ok(exit_code) => {
-            if exit_code == 0 {
-                if let Some(url) = &args_for_command.success_url {
-                    ping_url(
-                        url,
-                        args_for_command.url_retry_count,
-                        args_for_command.url_retry_delay_ms,
-                    );
-                }
-            } else if let Some(url) = &args_for_command.failure_url {
-                ping_url(
-                    url,
-                    args_for_command.url_retry_count,
-                    args_for_command.url_retry_delay_ms,
-                );
-            }
-            exit_code
-        }
+        Ok(code) => code,
         Err(e) => {
             eprintln!("Error: {}", e);
-            if let Some(url) = &args_for_command.failure_url {
-                ping_url(
-                    url,
-                    args_for_command.url_retry_count,
-                    args_for_command.url_retry_delay_ms,
-                );
-            }
             1
         }
     };
+
+    let url = if exit_code == 0 {
+        &args_for_command.success_url
+    } else {
+        &args_for_command.failure_url
+    };
+
+    if let Some(url) = url {
+        ping_url(
+            url,
+            args_for_command.url_retry_count,
+            args_for_command.url_retry_delay_ms,
+        );
+    }
 
     if args_for_command.wait {
         let _ = writeln!(writer, "Press Enter to continue...");
