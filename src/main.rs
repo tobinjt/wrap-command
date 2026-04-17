@@ -306,18 +306,26 @@ fn kill_child_process_group(
     }
 }
 
-fn run_command(args: &Args) -> Result<i32, String> {
-    let _lock_file = if let Some(lockfile_path) = &args.lockfile {
+fn acquire_lock(args: &Args) -> Result<Option<File>, String> {
+    if let Some(lockfile_path) = &args.lockfile {
         let lock_timeout = Duration::from_millis(args.lock_timeout_ms.unwrap_or(0));
-        Some(lock_file(Path::new(lockfile_path), lock_timeout)?)
+        Ok(Some(lock_file(Path::new(lockfile_path), lock_timeout)?))
     } else {
-        None
-    };
+        Ok(None)
+    }
+}
+
+fn run_command(args: &Args) -> Result<i32, String> {
+    let _lock_file = acquire_lock(args)?;
 
     if let Some(timeout_ms) = args.network_check_timeout_ms {
         check_network_connectivity(&args.network_check_url, timeout_ms)?;
     }
 
+    manage_child_process(args)
+}
+
+fn manage_child_process(args: &Args) -> Result<i32, String> {
     let mut child_command = Command::new(&args.command[0]);
     child_command.args(&args.command[1..]);
     if let Some(dir) = &args.directory {
