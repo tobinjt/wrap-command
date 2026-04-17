@@ -163,6 +163,7 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
         let file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(false)
             .open(lock_filename)
             .map_err(|e| e.to_string())?;
         match file.try_lock_exclusive() {
