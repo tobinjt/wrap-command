@@ -4,7 +4,7 @@ use fs4::fs_std::FileExt;
 use nix::sys::signal::killpg;
 use nix::unistd::Pid;
 use std::env;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
@@ -160,7 +160,11 @@ fn ping_url(url: &str, retry_count: u32, retry_delay_ms: u64) {
 fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, String> {
     let start = Instant::now();
     loop {
-        let file = File::create(lock_filename).map_err(|e| e.to_string())?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(lock_filename)
+            .map_err(|e| e.to_string())?;
         match file.try_lock_exclusive() {
             Ok(true) => return Ok(file),
             Ok(false) => {
