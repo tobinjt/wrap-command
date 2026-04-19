@@ -67,7 +67,8 @@ struct Args {
     #[arg(long = "command_timeout_ms")]
     command_timeout_ms: Option<u64>,
 
-    /// The signal to send to the command if it times out. Can be a signal name (e.g. "SIGTERM") or a signal number (e.g. "15").
+    /// The signal to send to the command if it times out. Can be a signal
+    /// name (e.g. "SIGTERM") or a signal number (e.g. "15").
     /// Defaults to SIGINT (2) if not specified.
     #[arg(
         long = "signal",
@@ -88,8 +89,15 @@ struct Args {
     #[arg(long = "directory")]
     directory: Option<String>,
 
-    /// Prepend `["sh", "-c"]` to the command.  Doesn't otherwise modify the command.
-    #[arg(long = "shell")]
+    /// Prepend `["sh", "-c"]` to the command.  Doesn't otherwise modify the
+    /// command, in particular if you use `--shell` with multiple arguments they
+    /// will be passed as multiple arguments to `sh`. E.g.
+    ///   "wrap-command" "--shell" "ls" "foo" "bar"
+    /// will result in:
+    ///   "sh" "-c" "ls" "foo" "bar"
+    /// *not*:
+    ///   "sh" "-c" "ls foo bar"
+    #[arg(long = "shell", verbatim_doc_comment)]
     shell: bool,
 
     /// Ping this URL on success, e.g. https://hc-ping.com/....
@@ -760,7 +768,11 @@ mod ping_tests {
     #[test]
     fn test_ping_url_success_first_try() {
         let mut server = Server::new();
-        let expected_request = server.mock("GET", "/success_first").with_status(200).expect(1).create();
+        let expected_request = server
+            .mock("GET", "/success_first")
+            .with_status(200)
+            .expect(1)
+            .create();
         let url = format!("{}/success_first", server.url());
 
         ping_url(&url, 2, 0);
@@ -772,7 +784,11 @@ mod ping_tests {
     fn test_ping_url_exhausts_retries() {
         let mut server = Server::new();
         // retry_count = 2 means it will try 1 + 2 = 3 times
-        let expected_request = server.mock("GET", "/exhausts").with_status(500).expect(3).create();
+        let expected_request = server
+            .mock("GET", "/exhausts")
+            .with_status(500)
+            .expect(3)
+            .create();
         let url = format!("{}/exhausts", server.url());
 
         ping_url(&url, 2, 0);
