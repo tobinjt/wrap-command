@@ -203,9 +203,9 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
             Ok(true) => return Ok(file),
             Ok(false) => {
                 if start.elapsed() >= lock_timeout {
-                    return Err(
-                        format!("Timeout waiting for lockfile after {lock_timeout:?}").to_string(),
-                    );
+                    return Err(format!(
+                        "Timeout waiting for lockfile after {lock_timeout:?}"
+                    ));
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
