@@ -218,6 +218,13 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
     }
 }
 
+fn push_opt<T: std::fmt::Display>(vec: &mut Vec<String>, flag: &str, opt: Option<T>) {
+    if let Some(val) = opt {
+        vec.push(flag.to_string());
+        vec.push(val.to_string());
+    }
+}
+
 fn make_tmux_command(args: Args) -> Vec<String> {
     let mut full_command = Vec::with_capacity(args.command.len() + 33);
     full_command.push("tmux".to_string());
@@ -235,21 +242,15 @@ fn make_tmux_command(args: Args) -> Vec<String> {
             .to_string(),
     );
 
-    if let Some(directory) = args.directory {
-        full_command.push("--directory".to_string());
-        full_command.push(directory);
-    }
-    if let Some(lockfile) = args.lockfile {
-        full_command.push("--lockfile".to_string());
-        full_command.push(lockfile);
-    }
-    if let Some(lock_timeout_ms) = args.lock_timeout_ms {
-        full_command.push("--lock_timeout_ms".to_string());
-        full_command.push(lock_timeout_ms.to_string());
-    }
-    if let Some(command_timeout_ms) = args.command_timeout_ms {
-        full_command.push("--command_timeout_ms".to_string());
-        full_command.push(command_timeout_ms.to_string());
+    push_opt(&mut full_command, "--directory", args.directory);
+    push_opt(&mut full_command, "--lockfile", args.lockfile);
+    push_opt(&mut full_command, "--lock_timeout_ms", args.lock_timeout_ms);
+    if args.command_timeout_ms.is_some() {
+        push_opt(
+            &mut full_command,
+            "--command_timeout_ms",
+            args.command_timeout_ms,
+        );
         full_command.push("--signal".to_string());
         full_command.push(
             args.signal
@@ -261,14 +262,8 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     if args.shell {
         full_command.push("--shell".to_string());
     }
-    if let Some(success_url) = args.success_url {
-        full_command.push("--success_url".to_string());
-        full_command.push(success_url);
-    }
-    if let Some(failure_url) = args.failure_url {
-        full_command.push("--failure_url".to_string());
-        full_command.push(failure_url);
-    }
+    push_opt(&mut full_command, "--success_url", args.success_url);
+    push_opt(&mut full_command, "--failure_url", args.failure_url);
     if args.url_retry_delay_ms != 1000 {
         full_command.push("--url_retry_delay_ms".to_string());
         full_command.push(args.url_retry_delay_ms.to_string());
@@ -283,10 +278,11 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     if args.wait {
         full_command.push("--wait".to_string());
     }
-    if let Some(network_check_timeout_ms) = args.network_check_timeout_ms {
-        full_command.push("--network_check_timeout_ms".to_string());
-        full_command.push(network_check_timeout_ms.to_string());
-    }
+    push_opt(
+        &mut full_command,
+        "--network_check_timeout_ms",
+        args.network_check_timeout_ms,
+    );
     if args.network_check_url != "http://clients3.google.com/generate_204" {
         full_command.push("--network_check_url".to_string());
         full_command.push(args.network_check_url);
