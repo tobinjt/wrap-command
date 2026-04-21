@@ -137,6 +137,31 @@ struct Args {
     command: Vec<String>,
 }
 
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            wait: false,
+            tmux_window_name: None,
+            lockfile: None,
+            lock_timeout_ms: None,
+            command_timeout_ms: None,
+            signal: None,
+            signal_timeout_ms: 1000,
+            directory: None,
+            shell: false,
+            success_url: None,
+            failure_url: None,
+            url_retry_delay_ms: 1000,
+            url_retry_count: 5,
+            caffeinate: false,
+            network_check_timeout_ms: None,
+            network_check_url: "http://clients3.google.com/generate_204".to_string(),
+            output_shell_completion: None,
+            command: Vec::new(),
+        }
+    }
+}
+
 fn ping_url(url: &str, retry_count: u32, retry_delay_ms: u64) {
     let mut attempts = 0;
     loop {
@@ -355,23 +380,7 @@ fn make_command_to_run(args: Args) -> Args {
     if args.tmux_window_name.is_some() {
         Args {
             command: make_tmux_command(args),
-            wait: false,
-            tmux_window_name: None,
-            lockfile: None,
-            lock_timeout_ms: None,
-            command_timeout_ms: None,
-            signal: None,
-            signal_timeout_ms: 1000,
-            directory: None,
-            shell: false,
-            success_url: None,
-            failure_url: None,
-            caffeinate: false,
-            network_check_timeout_ms: None,
-            network_check_url: "http://clients3.google.com/generate_204".to_string(),
-            url_retry_delay_ms: 1000,
-            url_retry_count: 5,
-            output_shell_completion: None,
+            ..Default::default()
         }
     } else {
         let mut command = args.command;
