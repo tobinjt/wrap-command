@@ -1159,6 +1159,25 @@ mod make_command_to_run {
     }
 
     #[test]
+    fn test_network_check_failure() {
+        let mut server = Server::new();
+        let _m = server.mock("HEAD", "/").with_status(500).create();
+
+        let url = server.url();
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--network_check_timeout_ms=500",
+            "--network_check_url",
+            &url,
+            "true",
+        ]);
+
+        let result = run_command(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Network check failed"));
+    }
+
+    #[test]
     fn test_network_check_timeout_zero() {
         let mut server = Server::new();
         let _m = server.mock("HEAD", "/").with_status(200).create();
