@@ -6,6 +6,7 @@ use nix::unistd::Pid;
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
@@ -159,15 +160,32 @@ fn ping_url(url: &str, retry_count: u32, retry_delay_ms: u64) {
 
 fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, String> {
     let start = Instant::now();
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_filename)
+        .map_err(|e| e.to_string())?;
+
     loop {
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(lock_filename)
-            .map_err(|e| e.to_string())?;
         match file.try_lock_exclusive() {
-            Ok(true) => return Ok(file),
+            Ok(true) => {
+                let file_meta = file.metadata().map_err(|e| e.to_string())?;
+                if let Ok(path_meta) = std::fs::metadata(lock_filename) {
+                    #[allow(clippy::collapsible_if)]
+                    if file_meta.dev() == path_meta.dev() && file_meta.ino() == path_meta.ino() {
+                        return Ok(file);
+                    }
+                }
+                // The file was deleted or replaced before we locked it, or immediately after.
+                // Drop the old descriptor by re-opening the current file at path.
+                file = OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(false)
+                    .open(lock_filename)
+                    .map_err(|e| e.to_string())?;
+            }
             Ok(false) => {
                 if start.elapsed() >= lock_timeout {
                     return Err(
