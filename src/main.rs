@@ -1412,3 +1412,30 @@ mod clap_test {
         assert!(error_msg.contains("--command_timeout_ms"));
     }
 }
+
+#[cfg(test)]
+mod push_opt_tests {
+    use super::*;
+
+    #[test]
+    fn test_push_opt_some_string() {
+        let mut vec = Vec::new();
+        push_opt(&mut vec, "--flag", Some("value".to_string()));
+        assert_eq!(vec, vec!["--flag", "value"]);
+    }
+
+    #[test]
+    fn test_push_opt_some_u64() {
+        let mut vec = Vec::new();
+        push_opt(&mut vec, "--timeout", Some(1000u64));
+        assert_eq!(vec, vec!["--timeout", "1000"]);
+    }
+
+    #[test]
+    fn test_push_opt_none() {
+        let mut vec = Vec::new();
+        let opt: Option<String> = None;
+        push_opt(&mut vec, "--flag", opt);
+        assert!(vec.is_empty());
+    }
+}
