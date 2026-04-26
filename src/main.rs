@@ -463,7 +463,7 @@ mod make_tmux_command {
     use super::*;
 
     #[test]
-    fn test_make_tmux_command_basic() {
+    fn test_make_tmux_command_basic() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec![
             "argv0",
             "--tmux_window_name=my_window",
@@ -471,10 +471,7 @@ mod make_tmux_command {
             "hello",
         ]);
         let result = make_tmux_command(args);
-        let current_exe = env::current_exe()
-            .expect("cannot determine current executable")
-            .display()
-            .to_string();
+        let current_exe = env::current_exe()?.display().to_string();
         assert_eq!(
             result,
             vec![
@@ -488,10 +485,11 @@ mod make_tmux_command {
                 "hello"
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn test_make_tmux_command_all_args() {
+    fn test_make_tmux_command_all_args() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec![
             "argv0",
             "--tmux_window_name=another_window",
@@ -509,10 +507,7 @@ mod make_tmux_command {
             "-la",
         ]);
         let result = make_tmux_command(args);
-        let current_exe = env::current_exe()
-            .expect("cannot determine current executable")
-            .display()
-            .to_string();
+        let current_exe = env::current_exe()?.display().to_string();
         assert_eq!(
             result,
             vec![
@@ -544,10 +539,11 @@ mod make_tmux_command {
                 "-la"
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn test_make_tmux_command_wait() {
+    fn test_make_tmux_command_wait() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec![
             "argv0",
             "--tmux_window_name=window",
@@ -556,10 +552,7 @@ mod make_tmux_command {
             "hello",
         ]);
         let result = make_tmux_command(args);
-        let current_exe = env::current_exe()
-            .expect("cannot determine current executable")
-            .display()
-            .to_string();
+        let current_exe = env::current_exe()?.display().to_string();
         assert_eq!(
             result,
             vec![
@@ -574,6 +567,7 @@ mod make_tmux_command {
                 "hello"
             ]
         );
+        Ok(())
     }
 
     #[test]
@@ -584,7 +578,7 @@ mod make_tmux_command {
     }
 
     #[test]
-    fn test_make_tmux_command_forward_urls() {
+    fn test_make_tmux_command_forward_urls() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec![
             "argv0",
             "--tmux_window_name=window",
@@ -594,10 +588,7 @@ mod make_tmux_command {
             "hello",
         ]);
         let result = make_tmux_command(args);
-        let current_exe = env::current_exe()
-            .expect("cannot determine current executable")
-            .display()
-            .to_string();
+        let current_exe = env::current_exe()?.display().to_string();
         assert_eq!(
             result,
             vec![
@@ -615,10 +606,11 @@ mod make_tmux_command {
                 "hello"
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn test_make_tmux_command_custom_network_check_url() {
+    fn test_make_tmux_command_custom_network_check_url() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec![
             "argv0",
             "--tmux_window_name=window",
@@ -627,10 +619,7 @@ mod make_tmux_command {
             "hello",
         ]);
         let result = make_tmux_command(args);
-        let current_exe = env::current_exe()
-            .expect("cannot determine current executable")
-            .display()
-            .to_string();
+        let current_exe = env::current_exe()?.display().to_string();
         assert_eq!(
             result,
             vec![
@@ -646,6 +635,7 @@ mod make_tmux_command {
                 "hello"
             ]
         );
+        Ok(())
     }
 }
 
@@ -655,7 +645,7 @@ mod ping_tests {
     use mockito::Server;
 
     #[test]
-    fn test_ping_success() {
+    fn test_ping_success() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = Server::new();
         let expected_request = server.mock("GET", "/success").with_status(200).create();
 
@@ -666,10 +656,11 @@ mod ping_tests {
         assert_eq!(result, 0);
         // Check that the expected request was made.
         expected_request.assert();
+        Ok(())
     }
 
     #[test]
-    fn test_ping_failure() {
+    fn test_ping_failure() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = Server::new();
         let expected_request = server.mock("GET", "/failure").with_status(200).create();
 
@@ -679,10 +670,11 @@ mod ping_tests {
         let result = realmain(args);
         assert_eq!(result, 1);
         expected_request.assert();
+        Ok(())
     }
 
     #[test]
-    fn test_ping_failure_on_command_error() {
+    fn test_ping_failure_on_command_error() -> Result<(), Box<dyn std::error::Error>> {
         // Run a command that doesn't exist to trigger Err() in run_command
         let mut server = Server::new();
         let expected_request = server.mock("GET", "/failure").with_status(200).create();
@@ -698,10 +690,11 @@ mod ping_tests {
         let result = realmain(args);
         assert_eq!(result, 1);
         expected_request.assert();
+        Ok(())
     }
 
     #[test]
-    fn test_success_does_not_trigger_failure_url() {
+    fn test_success_does_not_trigger_failure_url() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = Server::new();
         let m_failure = server.mock("GET", "/failure").expect(0).create();
         let m_success = server.mock("GET", "/success").with_status(200).create();
@@ -721,10 +714,11 @@ mod ping_tests {
 
         m_failure.assert();
         m_success.assert();
+        Ok(())
     }
 
     #[test]
-    fn test_failure_does_not_trigger_success_url() {
+    fn test_failure_does_not_trigger_success_url() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = Server::new();
         let m_failure = server.mock("GET", "/failure").with_status(200).create();
         let m_success = server.mock("GET", "/success").expect(0).create();
@@ -744,10 +738,11 @@ mod ping_tests {
 
         m_failure.assert();
         m_success.assert();
+        Ok(())
     }
 
     #[test]
-    fn test_ping_url_error() {
+    fn test_ping_url_error() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = Server::new();
         let expected_request = server
             .mock("GET", "/failure")
@@ -768,10 +763,11 @@ mod ping_tests {
         let result = realmain(args);
         assert_eq!(result, 1);
         expected_request.assert();
+        Ok(())
     }
 
     #[test]
-    fn test_ping_url_success_first_try() {
+    fn test_ping_url_success_first_try() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = Server::new();
         let expected_request = server
             .mock("GET", "/success_first")
@@ -783,10 +779,11 @@ mod ping_tests {
         ping_url(&url, 2, 0);
 
         expected_request.assert();
+        Ok(())
     }
 
     #[test]
-    fn test_ping_url_exhausts_retries() {
+    fn test_ping_url_exhausts_retries() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = Server::new();
         // retry_count = 2 means it will try 1 + 2 = 3 times
         let expected_request = server
@@ -799,6 +796,7 @@ mod ping_tests {
         ping_url(&url, 2, 0);
 
         expected_request.assert();
+        Ok(())
     }
 }
 
@@ -808,15 +806,18 @@ mod realmain {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_realmain_with_tmux_window_name() {
+    fn test_realmain_with_tmux_window_name() -> Result<(), Box<dyn std::error::Error>> {
         if env::var("TMUX").is_err() {
-            return;
+            return Ok(());
         }
-        let temp_file = NamedTempFile::new().unwrap();
+        let temp_file = NamedTempFile::new()?;
         let result = realmain(Args::parse_from(vec![
             "argv0",
             "--tmux_window_name=foo",
-            &format!("--lockfile={}", temp_file.path().to_str().unwrap()),
+            &format!(
+                "--lockfile={}",
+                temp_file.path().to_str().ok_or("invalid path")?
+            ),
             "--lock_timeout_ms=100",
             "--command_timeout_ms=100",
             "--directory=/tmp",
@@ -824,58 +825,65 @@ mod realmain {
             "foo",
         ]));
         assert_eq!(result, 0);
+        Ok(())
     }
 
     #[test]
-    fn test_realmain_lock_timeout() {
-        let temp_file = NamedTempFile::new().unwrap();
+    fn test_realmain_lock_timeout() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_file = NamedTempFile::new()?;
         let lock_path = temp_file.path();
-        let _lock = lock_file(lock_path, Duration::from_millis(100)).unwrap();
+        let _lock = lock_file(lock_path, Duration::from_millis(100))?;
         let result = realmain(Args::parse_from(vec![
             "argv0",
             "--lockfile",
-            lock_path.to_str().unwrap(),
+            lock_path.to_str().ok_or("invalid path")?,
             "--lock_timeout_ms=100",
             "echo",
             "foo",
         ]));
         assert_eq!(result, 1);
+        Ok(())
     }
 
     #[test]
-    fn test_realmain_with_shell() {
+    fn test_realmain_with_shell() -> Result<(), Box<dyn std::error::Error>> {
         let result = realmain(Args::parse_from(vec![
             "argv0", "--shell", "echo", "foo", "bar",
         ]));
         assert_eq!(result, 0);
+        Ok(())
     }
 
     #[test]
-    fn test_realmain_command_terminated_by_signal() {
+    fn test_realmain_command_terminated_by_signal() -> Result<(), Box<dyn std::error::Error>> {
         let result = realmain(Args::parse_from(vec!["argv0", "--shell", "kill -9 $$"]));
         assert_eq!(result, 1);
+        Ok(())
     }
 
     #[test]
-    fn test_realmain_fail_no_url() {
+    fn test_realmain_fail_no_url() -> Result<(), Box<dyn std::error::Error>> {
         let result = realmain(Args::parse_from(vec!["argv0", "false"]));
         assert_eq!(result, 1);
+        Ok(())
     }
 
     #[test]
-    fn test_realmain_error_no_url() {
+    fn test_realmain_error_no_url() -> Result<(), Box<dyn std::error::Error>> {
         let result = realmain(Args::parse_from(vec!["argv0", "command_does_not_exist"]));
         assert_eq!(result, 1);
+        Ok(())
     }
 
     #[test]
-    fn test_realmain_success_no_url() {
+    fn test_realmain_success_no_url() -> Result<(), Box<dyn std::error::Error>> {
         let result = realmain(Args::parse_from(vec!["argv0", "true"]));
         assert_eq!(result, 0);
+        Ok(())
     }
 
     #[test]
-    fn test_realmain_output_shell_completion() {
+    fn test_realmain_output_shell_completion() -> Result<(), Box<dyn std::error::Error>> {
         let mut buffer = Vec::new();
         let mut reader = std::io::Cursor::new(Vec::new());
         let result = realmain_impl(
@@ -884,12 +892,13 @@ mod realmain {
             &mut buffer,
         );
         assert_eq!(result, 0);
-        let output = String::from_utf8(buffer).unwrap();
+        let output = String::from_utf8(buffer)?;
         assert!(output.contains("_wrap-command"));
+        Ok(())
     }
 
     #[test]
-    fn test_realmain_wait() {
+    fn test_realmain_wait() -> Result<(), Box<dyn std::error::Error>> {
         let mut buffer = Vec::new();
         let mut reader = std::io::Cursor::new(b"\n");
         let result = realmain_impl(
@@ -898,9 +907,10 @@ mod realmain {
             &mut buffer,
         );
         assert_eq!(result, 0);
-        let output = String::from_utf8(buffer).unwrap();
+        let output = String::from_utf8(buffer)?;
         assert!(output.contains("Press Enter to continue..."));
         assert_eq!(reader.position(), 1);
+        Ok(())
     }
 }
 
@@ -910,41 +920,44 @@ mod run_command {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_run_command_success() {
+    fn test_run_command_success() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "echo", "foo"]);
         let result = run_command(&args);
-        assert_eq!(result.unwrap(), 0);
+        assert_eq!(result?, 0);
+        Ok(())
     }
 
     #[test]
-    fn test_run_command_lock_timeout() {
-        let temp_file = NamedTempFile::new().unwrap();
+    fn test_run_command_lock_timeout() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_file = NamedTempFile::new()?;
         let lock_path = temp_file.path();
-        let _lock = lock_file(lock_path, Duration::from_millis(100)).unwrap();
+        let _lock = lock_file(lock_path, Duration::from_millis(100))?;
 
         let args = Args::parse_from(vec![
             "argv0",
             "--lockfile",
-            lock_path.to_str().unwrap(),
+            lock_path.to_str().ok_or("invalid path")?,
             "--lock_timeout_ms=100",
             "echo",
             "foo",
         ]);
         let result = run_command(&args);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Timeout waiting for lockfile"));
+        assert!(result.err().ok_or("expected error")?.contains("Timeout waiting for lockfile"));
+        Ok(())
     }
 
     #[test]
-    fn test_run_command_timeout() {
+    fn test_run_command_timeout() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "--command_timeout_ms", "100", "sleep", "2"]);
         let result = run_command(&args);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Command timed out after 100ms");
+        assert_eq!(result.err().ok_or("expected error")?, "Command timed out after 100ms");
+        Ok(())
     }
 
     #[test]
-    fn test_run_command_success_with_timeout() {
+    fn test_run_command_success_with_timeout() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec![
             "argv0",
             "--command_timeout_ms",
@@ -953,56 +966,65 @@ mod run_command {
             "0.1",
         ]);
         let result = run_command(&args);
-        assert_eq!(result.unwrap(), 0);
+        assert_eq!(result?, 0);
+        Ok(())
     }
 
     #[test]
-    fn test_run_command_fail() {
+    fn test_run_command_fail() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "false"]);
         let result = run_command(&args);
-        assert_eq!(result.unwrap(), 1);
+        assert_eq!(result?, 1);
+        Ok(())
     }
 
     #[test]
-    fn test_run_command_in_directory() {
-        let temp_dir = tempfile::tempdir().unwrap();
+    fn test_run_command_in_directory() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
         let file_path = temp_dir.path().join("foo.txt");
-        File::create(file_path).unwrap();
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(file_path)?;
 
         let args = Args::parse_from(vec![
             "argv0",
             "--directory",
-            temp_dir.path().to_str().unwrap(),
+            temp_dir.path().to_str().ok_or("invalid path")?,
             "test",
             "-f",
             "foo.txt",
         ]);
         let result = run_command(&args);
-        assert_eq!(result.unwrap(), 0);
+        assert_eq!(result?, 0);
 
         let args_fail = Args::parse_from(vec!["argv0", "test", "-f", "foo.txt"]);
         let result_fail = run_command(&args_fail);
-        assert_eq!(result_fail.unwrap(), 1);
+        assert_eq!(result_fail?, 1);
+        Ok(())
     }
 
     #[test]
-    fn test_run_command_not_found() {
+    fn test_run_command_not_found() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "command_that_does_not_exist"]);
         let result = run_command(&args);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No such file or directory"));
+        assert!(result.err().ok_or("expected error")?.contains("No such file or directory"));
+        Ok(())
     }
 
     #[test]
-    fn test_run_command_terminated_by_signal() {
+    fn test_run_command_terminated_by_signal() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "bash", "-c", "kill $$"]);
         let result = run_command(&args);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Command terminated by signal");
+        assert_eq!(result.err().ok_or("expected error")?, "Command terminated by signal");
+        Ok(())
     }
 
     #[test]
-    fn test_run_command_invalid_signal() {
+    fn test_run_command_invalid_signal() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec![
             "argv0",
             "--command_timeout_ms",
@@ -1014,11 +1036,12 @@ mod run_command {
         ]);
         let result = run_command(&args);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Invalid signal"));
+        assert!(result.err().ok_or("expected error")?.contains("Invalid signal"));
+        Ok(())
     }
 
     #[test]
-    fn test_run_command_signal_timeout_kill() {
+    fn test_run_command_signal_timeout_kill() -> Result<(), Box<dyn std::error::Error>> {
         // This command ignores SIGTERM and sleeps for 2 seconds.
         // We set command_timeout to 100ms, so it will timeout.
         // We set signal to SIGTERM.
@@ -1041,11 +1064,12 @@ mod run_command {
         let elapsed = start.elapsed();
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Command timed out after 100ms");
+        assert_eq!(result.err().ok_or("expected error")?, "Command timed out after 100ms");
         // Elapsed should be roughly 100ms (command timeout) + 200ms (signal timeout)
         // It should be at least 300ms.
         // allow some buffer for CI flakiness, but definitely > 100ms.
         assert!(elapsed >= Duration::from_millis(250));
+        Ok(())
     }
 }
 
@@ -1057,51 +1081,60 @@ mod lock_file {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_lock_file_timeout() {
+    fn test_lock_file_timeout() -> Result<(), Box<dyn std::error::Error>> {
         let mut temp_file = env::temp_dir();
         temp_file.push("test_lock_file_timeout.lock");
 
-        let _lock = lock_file(&temp_file, Duration::from_millis(200)).unwrap();
+        let _lock = lock_file(&temp_file, Duration::from_millis(200))?;
 
         let lock_result = thread::spawn(move || lock_file(&temp_file, Duration::from_micros(500)))
             .join()
-            .unwrap();
+            .map_err(|_| "thread panicked")?;
 
         assert!(lock_result.is_err());
         assert!(
             lock_result
-                .unwrap_err()
+                .err()
+                .ok_or("expected error")?
                 .contains("Timeout waiting for lockfile after")
         );
+        Ok(())
     }
 
     #[test]
-    fn test_lock_file_error() {
+    fn test_lock_file_error() -> Result<(), Box<dyn std::error::Error>> {
         let lock_result = lock_file(Path::new("/dev/fd"), Duration::from_secs(1));
         assert!(lock_result.is_err());
-        assert!(lock_result.unwrap_err().contains("Is a directory"));
+        assert!(lock_result.err().ok_or("expected error")?.contains("Is a directory"));
+        Ok(())
     }
 
     #[test]
-    fn test_lock_file_retry() {
-        let temp_file = NamedTempFile::new().unwrap();
+    fn test_lock_file_retry() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_file = NamedTempFile::new()?;
         let lock_path = temp_file.path().to_owned();
 
         // Lock the file in the current thread first
-        let lock1 = File::create(&lock_path).unwrap();
-        lock1.lock_exclusive().unwrap();
+        let lock1 = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)?;
+        lock1.lock_exclusive()?;
 
         let start = Instant::now();
-        std::thread::scope(|s| {
+        let lock2 = std::thread::scope(|s| {
             s.spawn(|| {
                 std::thread::sleep(Duration::from_millis(500));
                 drop(lock1);
             });
 
-            let lock2 = lock_file(&lock_path, Duration::from_secs(2)).unwrap();
+            let lock2 = lock_file(&lock_path, Duration::from_secs(2));
             assert!(start.elapsed() >= Duration::from_millis(500));
-            drop(lock2);
-        });
+            lock2
+        })?;
+        drop(lock2);
+        Ok(())
     }
 }
 
@@ -1111,7 +1144,7 @@ mod make_command_to_run {
     use mockito::Server;
 
     #[test]
-    fn test_make_command_to_run_tmux() {
+    fn test_make_command_to_run_tmux() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec![
             "argv0",
             "--tmux_window_name=my_window",
@@ -1120,10 +1153,7 @@ mod make_command_to_run {
             "hello",
         ]);
         let result_args = make_command_to_run(args);
-        let current_exe = env::current_exe()
-            .expect("cannot determine current executable")
-            .display()
-            .to_string();
+        let current_exe = env::current_exe()?.display().to_string();
         assert_eq!(
             result_args.command,
             vec![
@@ -1149,10 +1179,11 @@ mod make_command_to_run {
         assert!(result_args.network_check_timeout_ms.is_none());
         assert_eq!(1000, result_args.url_retry_delay_ms);
         assert_eq!(5, result_args.url_retry_count);
+        Ok(())
     }
 
     #[test]
-    fn test_make_command_to_run_network_check() {
+    fn test_make_command_to_run_network_check() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec![
             "argv0",
             "--network_check_timeout_ms=500",
@@ -1162,13 +1193,14 @@ mod make_command_to_run {
         let result_args = make_command_to_run(args);
         assert_eq!(result_args.network_check_timeout_ms, Some(500));
         assert_eq!(result_args.network_check_url, "http://example.com");
+        Ok(())
     }
 
     #[test]
-    fn test_network_check_timeout() {
+    fn test_network_check_timeout() -> Result<(), Box<dyn std::error::Error>> {
         // Create a listener that accepts a connection but sends nothing, forcing a timeout
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
         let url = format!("http://127.0.0.1:{}", port);
 
         std::thread::spawn(move || {
@@ -1189,11 +1221,12 @@ mod make_command_to_run {
         let result = run_command(&args);
         assert!(result.is_err());
         // Verify it failed due to network check
-        assert!(result.unwrap_err().contains("Network check failed"));
+        assert!(result.err().ok_or("expected error")?.contains("Network check failed"));
+        Ok(())
     }
 
     #[test]
-    fn test_network_check_success() {
+    fn test_network_check_success() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = Server::new();
         let _m = server.mock("HEAD", "/").with_status(200).create();
 
@@ -1207,11 +1240,12 @@ mod make_command_to_run {
         ]);
 
         let result = run_command(&args);
-        assert_eq!(result.unwrap(), 0);
+        assert_eq!(result?, 0);
+        Ok(())
     }
 
     #[test]
-    fn test_network_check_failure() {
+    fn test_network_check_failure() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = Server::new();
         let _m = server.mock("HEAD", "/").with_status(500).create();
 
@@ -1226,11 +1260,12 @@ mod make_command_to_run {
 
         let result = run_command(&args);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Network check failed"));
+        assert!(result.err().ok_or("expected error")?.contains("Network check failed"));
+        Ok(())
     }
 
     #[test]
-    fn test_network_check_timeout_zero() {
+    fn test_network_check_timeout_zero() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = Server::new();
         let _m = server.mock("HEAD", "/").with_status(200).create();
 
@@ -1244,19 +1279,21 @@ mod make_command_to_run {
         ]);
 
         let result = run_command(&args);
-        assert_eq!(result.unwrap(), 0);
+        assert_eq!(result?, 0);
+        Ok(())
     }
 
     #[test]
-    fn test_make_command_to_run_shell() {
+    fn test_make_command_to_run_shell() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "--shell", "echo", "foo", "bar"]);
         let result_args = make_command_to_run(args);
         assert_eq!(result_args.command, vec!["sh", "-c", "echo", "foo", "bar"]);
         assert!(result_args.shell);
+        Ok(())
     }
 
     #[test]
-    fn test_make_command_to_run_no_modification() {
+    fn test_make_command_to_run_no_modification() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "--lockfile=/tmp/foo.lock", "echo", "hello"]);
         let original_args = args.clone();
         let result_args = make_command_to_run(args);
@@ -1274,10 +1311,11 @@ mod make_command_to_run {
             original_args.signal_timeout_ms
         );
         assert_eq!(result_args.caffeinate, original_args.caffeinate);
+        Ok(())
     }
 
     #[test]
-    fn test_make_command_to_run_caffeinate() {
+    fn test_make_command_to_run_caffeinate() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "--caffeinate", "echo", "foo"]);
         let result_args = make_command_to_run(args);
         let mut expected_command = CAFFEINATE_CMD
@@ -1287,10 +1325,11 @@ mod make_command_to_run {
         expected_command.extend_from_slice(&["echo".to_string(), "foo".to_string()]);
         assert_eq!(result_args.command, expected_command);
         assert!(result_args.caffeinate);
+        Ok(())
     }
 
     #[test]
-    fn test_make_command_to_run_shell_caffeinate() {
+    fn test_make_command_to_run_shell_caffeinate() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "--shell", "--caffeinate", "echo", "foo"]);
         let result_args = make_command_to_run(args);
         let mut expected_command = CAFFEINATE_CMD
@@ -1306,6 +1345,7 @@ mod make_command_to_run {
         assert_eq!(result_args.command, expected_command);
         assert!(result_args.caffeinate);
         assert!(result_args.shell);
+        Ok(())
     }
 }
 
@@ -1320,7 +1360,7 @@ mod clap_test {
     }
 
     #[test]
-    fn parse_args() {
+    fn parse_args() -> Result<(), Box<dyn std::error::Error>> {
         // Checks that I've configured the parser correctly.
         let args = Args::parse_from(vec!["argv0", "echo"]);
         assert_eq!(vec!["echo".to_string()], args.command);
@@ -1366,49 +1406,55 @@ mod clap_test {
             vec!["echo".to_string(), "foo".to_string(), "bar".to_string()],
             args.command
         );
+        Ok(())
     }
 
     #[test]
-    fn parse_args_wait() {
+    fn parse_args_wait() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "--wait", "echo"]);
         assert!(args.wait);
         assert_eq!(vec!["echo".to_string()], args.command);
+        Ok(())
     }
 
     #[test]
-    fn test_parse_args_default_signal() {
+    fn test_parse_args_default_signal() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "--command_timeout_ms", "100", "echo", "foo"]);
         assert_eq!(Some("SIGTERM"), args.signal.as_deref());
         assert_eq!(1000, args.signal_timeout_ms);
+        Ok(())
     }
 
     #[test]
-    fn test_lock_timeout_requires_lockfile() {
+    fn test_lock_timeout_requires_lockfile() -> Result<(), Box<dyn std::error::Error>> {
         let result = Args::try_parse_from(vec!["argv0", "--lock_timeout_ms=100", "echo", "foo"]);
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.err().ok_or("expected error")?;
         let error_msg = err.to_string();
         assert!(error_msg.contains("required"));
         assert!(error_msg.contains("--lockfile"));
+        Ok(())
     }
 
     #[test]
-    fn test_signal_requires_command_timeout_ms() {
+    fn test_signal_requires_command_timeout_ms() -> Result<(), Box<dyn std::error::Error>> {
         let result = Args::try_parse_from(vec!["argv0", "--signal=SIGTERM", "echo", "foo"]);
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.err().ok_or("expected error")?;
         let error_msg = err.to_string();
         assert!(error_msg.contains("required"));
         assert!(error_msg.contains("--command_timeout_ms"));
+        Ok(())
     }
 
     #[test]
-    fn test_signal_timeout_requires_command_timeout_ms() {
+    fn test_signal_timeout_requires_command_timeout_ms() -> Result<(), Box<dyn std::error::Error>> {
         let result = Args::try_parse_from(vec!["argv0", "--signal_timeout_ms=100", "echo", "foo"]);
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.err().ok_or("expected error")?;
         let error_msg = err.to_string();
         assert!(error_msg.contains("required"));
         assert!(error_msg.contains("--command_timeout_ms"));
+        Ok(())
     }
 }
