@@ -1,45 +1,21 @@
-#!/usr/bin/env -S make_rust_github_workflow wrap-command
+#!/usr/bin/env -S make_github_workflows
 version: 2
 updates:
-  - package-ecosystem: "github-actions"
-    directory: "/"
+
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
+      interval: weekly
     cooldown:
       default-days: 7
 
-  - package-ecosystem: "gomod"
-    directory: "/"
+  - package-ecosystem: cargo
+    directory: /
     schedule:
-      interval: "weekly"
-    # Group updates into one PR.
-    groups:
-      go-dependencies:
-        patterns:
-          - "*"
-    cooldown:
-      default-days: 7
-
-  - package-ecosystem: "cargo"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    # Group updates into one PR.
+      interval: weekly
     groups:
       cargo-dependencies:
         patterns:
-          - "*"
-    cooldown:
-      default-days: 7
-
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    # Group updates into one PR.
-    groups:
-      pip-dependencies:
-        patterns:
-          - "*"
+          - '*'
     cooldown:
       default-days: 7

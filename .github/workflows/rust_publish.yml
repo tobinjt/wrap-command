@@ -1,4 +1,4 @@
-#!/usr/bin/env -S make_rust_github_workflow wrap-command
+#!/usr/bin/env -S make_github_workflows
 name: Publish to crates.io if tests pass.
 
 on:
