@@ -943,7 +943,12 @@ mod run_command {
         ]);
         let result = run_command(&args);
         assert!(result.is_err());
-        assert!(result.err().ok_or("expected error")?.contains("Timeout waiting for lockfile"));
+        assert!(
+            result
+                .err()
+                .ok_or("expected error")?
+                .contains("Timeout waiting for lockfile")
+        );
         Ok(())
     }
 
@@ -952,7 +957,10 @@ mod run_command {
         let args = Args::parse_from(vec!["argv0", "--command_timeout_ms", "100", "sleep", "2"]);
         let result = run_command(&args);
         assert!(result.is_err());
-        assert_eq!(result.err().ok_or("expected error")?, "Command timed out after 100ms");
+        assert_eq!(
+            result.err().ok_or("expected error")?,
+            "Command timed out after 100ms"
+        );
         Ok(())
     }
 
@@ -1010,7 +1018,12 @@ mod run_command {
         let args = Args::parse_from(vec!["argv0", "command_that_does_not_exist"]);
         let result = run_command(&args);
         assert!(result.is_err());
-        assert!(result.err().ok_or("expected error")?.contains("No such file or directory"));
+        assert!(
+            result
+                .err()
+                .ok_or("expected error")?
+                .contains("No such file or directory")
+        );
         Ok(())
     }
 
@@ -1019,7 +1032,10 @@ mod run_command {
         let args = Args::parse_from(vec!["argv0", "bash", "-c", "kill $$"]);
         let result = run_command(&args);
         assert!(result.is_err());
-        assert_eq!(result.err().ok_or("expected error")?, "Command terminated by signal");
+        assert_eq!(
+            result.err().ok_or("expected error")?,
+            "Command terminated by signal"
+        );
         Ok(())
     }
 
@@ -1036,7 +1052,12 @@ mod run_command {
         ]);
         let result = run_command(&args);
         assert!(result.is_err());
-        assert!(result.err().ok_or("expected error")?.contains("Invalid signal"));
+        assert!(
+            result
+                .err()
+                .ok_or("expected error")?
+                .contains("Invalid signal")
+        );
         Ok(())
     }
 
@@ -1064,7 +1085,10 @@ mod run_command {
         let elapsed = start.elapsed();
 
         assert!(result.is_err());
-        assert_eq!(result.err().ok_or("expected error")?, "Command timed out after 100ms");
+        assert_eq!(
+            result.err().ok_or("expected error")?,
+            "Command timed out after 100ms"
+        );
         // Elapsed should be roughly 100ms (command timeout) + 200ms (signal timeout)
         // It should be at least 300ms.
         // allow some buffer for CI flakiness, but definitely > 100ms.
@@ -1105,7 +1129,12 @@ mod lock_file {
     fn test_lock_file_error() -> Result<(), Box<dyn std::error::Error>> {
         let lock_result = lock_file(Path::new("/dev/fd"), Duration::from_secs(1));
         assert!(lock_result.is_err());
-        assert!(lock_result.err().ok_or("expected error")?.contains("Is a directory"));
+        assert!(
+            lock_result
+                .err()
+                .ok_or("expected error")?
+                .contains("Is a directory")
+        );
         Ok(())
     }
 
@@ -1221,7 +1250,12 @@ mod make_command_to_run {
         let result = run_command(&args);
         assert!(result.is_err());
         // Verify it failed due to network check
-        assert!(result.err().ok_or("expected error")?.contains("Network check failed"));
+        assert!(
+            result
+                .err()
+                .ok_or("expected error")?
+                .contains("Network check failed")
+        );
         Ok(())
     }
 
@@ -1260,7 +1294,12 @@ mod make_command_to_run {
 
         let result = run_command(&args);
         assert!(result.is_err());
-        assert!(result.err().ok_or("expected error")?.contains("Network check failed"));
+        assert!(
+            result
+                .err()
+                .ok_or("expected error")?
+                .contains("Network check failed")
+        );
         Ok(())
     }
 
