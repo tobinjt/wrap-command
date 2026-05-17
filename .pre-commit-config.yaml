@@ -1,4 +1,4 @@
-#!/usr/bin/env -S "populate_pre_commit"
+#!/usr/bin/env -S "populate_pre_commit"\_--extra-arg\_"cargo-llvm-cov=--fail-uncovered-lines=5\_--fail-uncovered-functions=7"
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
@@ -62,10 +62,10 @@ repos:
     - id: cargo-fmt
     - id: cargo-llvm-cov
       args:
-      - --fail-uncovered-lines=5
-      - --fail-uncovered-functions=7
       - --quiet
       - --show-missing-lines
+      - --fail-uncovered-lines=5
+      - --fail-uncovered-functions=7
     - id: cargo-test
   # managed-by-populate-pre-commit end: rust.yaml
   # managed-by-populate-pre-commit start: spellcheck.yaml
