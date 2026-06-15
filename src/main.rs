@@ -21,15 +21,19 @@ const CAFFEINATE_CMD: &[&str] = &["systemd-inhibit", "--what=idle"];
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 compile_error!("wrap-command only supports MacOS and Linux");
 
+fn parse_duration(arg: &str) -> Result<Duration, String> {
+    fundu::parse_duration(arg).map_err(|e| e.to_string())
+}
+
 const LONG_ABOUT: &str = "A program that wraps a command, optionally:
 - using a lock to ensure only one instance is running (--lockfile)
   - either failing immediately if the lock is held or waiting for a
-    configurable time for the lock to be released (--lock_timeout_ms)
-- running the command with a timeout (--command_timeout_ms)
+    configurable time for the lock to be released (--lock_timeout)
+- running the command with a timeout (--command_timeout)
   - the signal to send can be specified with --signal, it defaults
     to SIGTERM (15).
   - the time to wait for the child to exit after sending the signal
-    can be specified with --signal_timeout_ms, it defaults to 1000ms.
+    can be specified with --signal_timeout, it defaults to 1s.
     If the child process is still running after this time, it is
     killed with SIGKILL (9).
 - running the command from a different directory (--directory)
@@ -37,9 +41,9 @@ const LONG_ABOUT: &str = "A program that wraps a command, optionally:
   $() can be used (--shell)
 - running the command in a new tmux window (--tmux_window_name)
 - preventing the system from sleeping (--caffeinate)
-- waiting for network connectivity (--network_check_timeout_ms)
+- waiting for network connectivity (--network_check_timeout)
   - waits for http://clients3.google.com/generate_204 to be reachable.
-  - 0 means wait forever, >0 means timeout after that many ms.
+  - 0s means wait forever, otherwise timeout after that duration.
 - waiting for the user to press enter after the command has finished (--wait)
 Any combination of unindented flags is supported.  The indented flags
 require the flag they are indented under.";
@@ -59,31 +63,32 @@ struct Args {
     #[arg(long = "lockfile")]
     lockfile: Option<String>,
 
-    /// The lock_timeout in milliseconds.
-    #[arg(long = "lock_timeout_ms", requires = "lockfile")]
-    lock_timeout_ms: Option<u64>,
+    /// The lock_timeout duration.
+    #[arg(long = "lock_timeout", requires = "lockfile", value_parser = parse_duration)]
+    lock_timeout: Option<Duration>,
 
-    /// The command_timeout in milliseconds.
-    #[arg(long = "command_timeout_ms")]
-    command_timeout_ms: Option<u64>,
+    /// The command_timeout duration.
+    #[arg(long = "command_timeout", value_parser = parse_duration)]
+    command_timeout: Option<Duration>,
 
     /// The signal to send to the command if it times out. Can be a signal
     /// name (e.g. "SIGTERM") or a signal number (e.g. "15").
     /// Defaults to SIGINT (2) if not specified.
     #[arg(
         long = "signal",
-        requires = "command_timeout_ms",
+        requires = "command_timeout",
         default_value = "SIGTERM"
     )]
     signal: Option<String>,
 
-    /// The time in milliseconds to wait for the child to exit after sending signal.
+    /// The time to wait for the child to exit after sending signal.
     #[arg(
-        long = "signal_timeout_ms",
-        requires = "command_timeout_ms",
-        default_value_t = 1000
+        long = "signal_timeout",
+        requires = "command_timeout",
+        default_value = "1s",
+        value_parser = parse_duration
     )]
-    signal_timeout_ms: u64,
+    signal_timeout: Duration,
 
     /// The directory to run the command in.
     #[arg(long = "directory")]
@@ -108,9 +113,9 @@ struct Args {
     #[arg(long = "failure_url")]
     failure_url: Option<String>,
 
-    /// Delay between retries when pinging success/failure URLs in milliseconds.
-    #[arg(long = "url_retry_delay_ms", default_value_t = 1000)]
-    url_retry_delay_ms: u64,
+    /// Delay between retries when pinging success/failure URLs.
+    #[arg(long = "url_retry_delay", default_value = "1s", value_parser = parse_duration)]
+    url_retry_delay: Duration,
 
     /// Number of retries when pinging success/failure URLs.
     #[arg(long = "url_retry_count", default_value_t = 5)]
@@ -121,9 +126,9 @@ struct Args {
     caffeinate: bool,
 
     /// Wait for network connectivity before running the command.
-    /// 0: wait forever. >0: timeout in ms.
-    #[arg(long = "network_check_timeout_ms")]
-    network_check_timeout_ms: Option<u64>,
+    /// 0s: wait forever. Otherwise: timeout duration.
+    #[arg(long = "network_check_timeout", value_parser = parse_duration)]
+    network_check_timeout: Option<Duration>,
 
     /// URL to check for network connectivity.
     #[arg(
@@ -151,18 +156,18 @@ impl Default for Args {
             wait: false,
             tmux_window_name: None,
             lockfile: None,
-            lock_timeout_ms: None,
-            command_timeout_ms: None,
+            lock_timeout: None,
+            command_timeout: None,
             signal: None,
-            signal_timeout_ms: 1000,
+            signal_timeout: Duration::from_secs(1),
             directory: None,
             shell: false,
             success_url: None,
             failure_url: None,
-            url_retry_delay_ms: 1000,
+            url_retry_delay: Duration::from_secs(1),
             url_retry_count: 5,
             caffeinate: false,
-            network_check_timeout_ms: None,
+            network_check_timeout: None,
             network_check_url: "http://clients3.google.com/generate_204".to_string(),
             output_shell_completion: None,
             command: Vec::new(),
@@ -170,7 +175,7 @@ impl Default for Args {
     }
 }
 
-fn ping_url(url: &str, retry_count: u32, retry_delay_ms: u64) {
+fn ping_url(url: &str, retry_count: u32, retry_delay: Duration) {
     let mut attempts = 0;
     loop {
         match ureq::get(url).call() {
@@ -183,7 +188,7 @@ fn ping_url(url: &str, retry_count: u32, retry_delay_ms: u64) {
                     );
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(retry_delay_ms));
+                std::thread::sleep(retry_delay);
                 attempts += 1;
             }
         }
@@ -244,29 +249,33 @@ fn make_tmux_command(args: Args) -> Vec<String> {
 
     push_opt(&mut full_command, "--directory", args.directory);
     push_opt(&mut full_command, "--lockfile", args.lockfile);
-    push_opt(&mut full_command, "--lock_timeout_ms", args.lock_timeout_ms);
-    if args.command_timeout_ms.is_some() {
+    push_opt(
+        &mut full_command,
+        "--lock_timeout",
+        args.lock_timeout.map(|d| format!("{}ms", d.as_millis())),
+    );
+    if args.command_timeout.is_some() {
         push_opt(
             &mut full_command,
-            "--command_timeout_ms",
-            args.command_timeout_ms,
+            "--command_timeout",
+            args.command_timeout.map(|d| format!("{}ms", d.as_millis())),
         );
         full_command.push("--signal".to_string());
         full_command.push(
             args.signal
                 .expect("Internal error: signal argument should always be set"),
         );
-        full_command.push("--signal_timeout_ms".to_string());
-        full_command.push(args.signal_timeout_ms.to_string());
+        full_command.push("--signal_timeout".to_string());
+        full_command.push(format!("{}ms", args.signal_timeout.as_millis()));
     }
     if args.shell {
         full_command.push("--shell".to_string());
     }
     push_opt(&mut full_command, "--success_url", args.success_url);
     push_opt(&mut full_command, "--failure_url", args.failure_url);
-    if args.url_retry_delay_ms != 1000 {
-        full_command.push("--url_retry_delay_ms".to_string());
-        full_command.push(args.url_retry_delay_ms.to_string());
+    if args.url_retry_delay != Duration::from_secs(1) {
+        full_command.push("--url_retry_delay".to_string());
+        full_command.push(format!("{}ms", args.url_retry_delay.as_millis()));
     }
     if args.url_retry_count != 5 {
         full_command.push("--url_retry_count".to_string());
@@ -280,8 +289,9 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     }
     push_opt(
         &mut full_command,
-        "--network_check_timeout_ms",
-        args.network_check_timeout_ms,
+        "--network_check_timeout",
+        args.network_check_timeout
+            .map(|d| format!("{}ms", d.as_millis())),
     );
     if args.network_check_url != "http://clients3.google.com/generate_204" {
         full_command.push("--network_check_url".to_string());
@@ -291,10 +301,10 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     full_command
 }
 
-fn check_network_connectivity(url: &str, timeout_ms: u64) -> Result<(), String> {
+fn check_network_connectivity(url: &str, timeout: Duration) -> Result<(), String> {
     let mut builder = ureq::config::Config::builder();
-    if timeout_ms > 0 {
-        builder = builder.timeout_global(Some(Duration::from_millis(timeout_ms)));
+    if !timeout.is_zero() {
+        builder = builder.timeout_global(Some(timeout));
     }
     let agent = builder.build().new_agent();
     match agent.head(url).call() {
@@ -306,7 +316,7 @@ fn check_network_connectivity(url: &str, timeout_ms: u64) -> Result<(), String> 
 fn kill_child_process_group(
     child: &mut std::process::Child,
     signal_name: Option<&str>,
-    signal_timeout_ms: u64,
+    signal_timeout: Duration,
 ) -> Result<(), String> {
     let pgid = Pid::from_raw(child.id() as i32);
     let signal: nix::sys::signal::Signal = signal_name
@@ -318,10 +328,12 @@ fn kill_child_process_group(
     // dependency injection I guess.  Maybe I could inject `Command::new` instead?
     killpg(pgid, signal).map_err(|e| e.to_string())?;
 
-    let timeout = Duration::from_millis(signal_timeout_ms);
     // I can't test this without causing wait_timeout() to fail, which would require
     // dependency injection I guess.  Maybe I could inject `Command::new` instead?
-    match child.wait_timeout(timeout).map_err(|e| e.to_string())? {
+    match child
+        .wait_timeout(signal_timeout)
+        .map_err(|e| e.to_string())?
+    {
         Some(_) => Ok(()),
         None => {
             // I can't test this without causing killpg() to fail, which would require
@@ -337,7 +349,7 @@ fn kill_child_process_group(
 
 fn acquire_lock(args: &Args) -> Result<Option<File>, String> {
     if let Some(lockfile_path) = &args.lockfile {
-        let lock_timeout = Duration::from_millis(args.lock_timeout_ms.unwrap_or(0));
+        let lock_timeout = args.lock_timeout.unwrap_or(Duration::ZERO);
         Ok(Some(lock_file(Path::new(lockfile_path), lock_timeout)?))
     } else {
         Ok(None)
@@ -347,8 +359,8 @@ fn acquire_lock(args: &Args) -> Result<Option<File>, String> {
 fn run_command(args: &Args) -> Result<i32, String> {
     let _lock_file = acquire_lock(args)?;
 
-    if let Some(timeout_ms) = args.network_check_timeout_ms {
-        check_network_connectivity(&args.network_check_url, timeout_ms)?;
+    if let Some(timeout) = args.network_check_timeout {
+        check_network_connectivity(&args.network_check_url, timeout)?;
     }
 
     manage_child_process(args)
@@ -364,18 +376,14 @@ fn manage_child_process(args: &Args) -> Result<i32, String> {
 
     let mut child = child_command.spawn().map_err(|e| e.to_string())?;
 
-    let timeout = args.command_timeout_ms.map(Duration::from_millis);
+    let timeout = args.command_timeout;
     let exit_status = match timeout {
         // I can't test this without causing wait_timeout() to fail, which would require
         // dependency injection I guess.  Maybe I could inject `Command::new` instead?
         Some(duration) => match child.wait_timeout(duration).map_err(|e| e.to_string())? {
             Some(status) => Ok(status),
             None => {
-                kill_child_process_group(
-                    &mut child,
-                    args.signal.as_deref(),
-                    args.signal_timeout_ms,
-                )?;
+                kill_child_process_group(&mut child, args.signal.as_deref(), args.signal_timeout)?;
                 Err(format!("Command timed out after {duration:?}"))
             }
         },
@@ -442,7 +450,7 @@ fn realmain_impl<R: io::BufRead, W: io::Write>(args: Args, reader: &mut R, write
         ping_url(
             url,
             args_for_command.url_retry_count,
-            args_for_command.url_retry_delay_ms,
+            args_for_command.url_retry_delay,
         );
     }
 
@@ -494,15 +502,17 @@ mod make_tmux_command {
             "argv0",
             "--tmux_window_name=another_window",
             "--lockfile=/tmp/foo.lock",
-            "--lock_timeout_ms=1000",
-            "--command_timeout_ms=5000",
+            "--lock_timeout=1000ms",
+            "--command_timeout=5000ms",
             "--directory=/tmp",
             "--signal=SIGTERM",
-            "--signal_timeout_ms=2000",
+            "--signal_timeout=2000ms",
             "--shell",
             "--caffeinate",
-            "--url_retry_delay_ms=2000",
+            "--url_retry_delay=2000ms",
             "--url_retry_count=10",
+            "--network_check_timeout=3s",
+            "--network_check_url=http://example.com",
             "ls",
             "-la",
         ]);
@@ -521,20 +531,24 @@ mod make_tmux_command {
                 "/tmp",
                 "--lockfile",
                 "/tmp/foo.lock",
-                "--lock_timeout_ms",
-                "1000",
-                "--command_timeout_ms",
-                "5000",
+                "--lock_timeout",
+                "1000ms",
+                "--command_timeout",
+                "5000ms",
                 "--signal",
                 "SIGTERM",
-                "--signal_timeout_ms",
-                "2000",
+                "--signal_timeout",
+                "2000ms",
                 "--shell",
-                "--url_retry_delay_ms",
-                "2000",
+                "--url_retry_delay",
+                "2000ms",
                 "--url_retry_count",
                 "10",
                 "--caffeinate",
+                "--network_check_timeout",
+                "3000ms",
+                "--network_check_url",
+                "http://example.com",
                 "ls",
                 "-la"
             ]
@@ -755,8 +769,8 @@ mod ping_tests {
             "argv0",
             "--failure_url",
             &url,
-            "--url_retry_delay_ms",
-            "0",
+            "--url_retry_delay",
+            "0s",
             "false",
         ]);
 
@@ -776,7 +790,7 @@ mod ping_tests {
             .create();
         let url = format!("{}/success_first", server.url());
 
-        ping_url(&url, 2, 0);
+        ping_url(&url, 2, Duration::ZERO);
 
         expected_request.assert();
         Ok(())
@@ -793,9 +807,34 @@ mod ping_tests {
             .create();
         let url = format!("{}/exhausts", server.url());
 
-        ping_url(&url, 2, 0);
+        ping_url(&url, 2, Duration::ZERO);
 
         expected_request.assert();
+        Ok(())
+    }
+
+    #[test]
+    fn test_ping_url_success_after_retry() -> Result<(), Box<dyn std::error::Error>> {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
+        let url = format!("http://127.0.0.1:{}", port);
+
+        std::thread::spawn(move || {
+            // 1st request: accept connection and return 500
+            if let Ok((mut stream, _)) = listener.accept() {
+                use std::io::Write;
+                let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+                let _ = stream.write_all(response.as_bytes());
+            }
+            // 2nd request: accept connection and return 200
+            if let Ok((mut stream, _)) = listener.accept() {
+                use std::io::Write;
+                let response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+
+        ping_url(&url, 2, Duration::from_millis(1));
         Ok(())
     }
 }
@@ -807,9 +846,25 @@ mod realmain {
 
     #[test]
     fn test_realmain_with_tmux_window_name() -> Result<(), Box<dyn std::error::Error>> {
-        if env::var("TMUX").is_err() {
-            return Ok(());
+        let temp_dir = tempfile::tempdir()?;
+        let tmux_mock_path = temp_dir.path().join("tmux");
+        std::fs::write(&tmux_mock_path, "#!/bin/sh\nexit 0")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmux_mock_path, std::fs::Permissions::from_mode(0o755))?;
         }
+
+        let old_path = env::var("PATH").ok();
+        let new_path = match &old_path {
+            Some(path) => format!("{}:{}", temp_dir.path().to_str().unwrap(), path),
+            None => temp_dir.path().to_str().unwrap().to_string(),
+        };
+        unsafe {
+            env::set_var("PATH", &new_path);
+            env::set_var("TMUX", "1");
+        }
+
         let temp_file = NamedTempFile::new()?;
         let result = realmain(Args::parse_from(vec![
             "argv0",
@@ -818,12 +873,22 @@ mod realmain {
                 "--lockfile={}",
                 temp_file.path().to_str().ok_or("invalid path")?
             ),
-            "--lock_timeout_ms=100",
-            "--command_timeout_ms=100",
+            "--lock_timeout=100ms",
+            "--command_timeout=100ms",
             "--directory=/tmp",
             "echo",
             "foo",
         ]));
+
+        unsafe {
+            if let Some(path) = old_path {
+                env::set_var("PATH", path);
+            } else {
+                env::remove_var("PATH");
+            }
+            env::remove_var("TMUX");
+        }
+
         assert_eq!(result, 0);
         Ok(())
     }
@@ -837,7 +902,7 @@ mod realmain {
             "argv0",
             "--lockfile",
             lock_path.to_str().ok_or("invalid path")?,
-            "--lock_timeout_ms=100",
+            "--lock_timeout=100ms",
             "echo",
             "foo",
         ]));
@@ -937,7 +1002,7 @@ mod run_command {
             "argv0",
             "--lockfile",
             lock_path.to_str().ok_or("invalid path")?,
-            "--lock_timeout_ms=100",
+            "--lock_timeout=100ms",
             "echo",
             "foo",
         ]);
@@ -954,7 +1019,7 @@ mod run_command {
 
     #[test]
     fn test_run_command_timeout() -> Result<(), Box<dyn std::error::Error>> {
-        let args = Args::parse_from(vec!["argv0", "--command_timeout_ms", "100", "sleep", "2"]);
+        let args = Args::parse_from(vec!["argv0", "--command_timeout", "100ms", "sleep", "2"]);
         let result = run_command(&args);
         assert!(result.is_err());
         assert_eq!(
@@ -966,13 +1031,7 @@ mod run_command {
 
     #[test]
     fn test_run_command_success_with_timeout() -> Result<(), Box<dyn std::error::Error>> {
-        let args = Args::parse_from(vec![
-            "argv0",
-            "--command_timeout_ms",
-            "2000",
-            "sleep",
-            "0.1",
-        ]);
+        let args = Args::parse_from(vec!["argv0", "--command_timeout", "2s", "sleep", "0.1"]);
         let result = run_command(&args);
         assert_eq!(result?, 0);
         Ok(())
@@ -1043,8 +1102,8 @@ mod run_command {
     fn test_run_command_invalid_signal() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec![
             "argv0",
-            "--command_timeout_ms",
-            "10",
+            "--command_timeout",
+            "10ms",
             "--signal",
             "INVALID_SIGNAL",
             "sleep",
@@ -1070,12 +1129,12 @@ mod run_command {
         // It should receive SIGTERM, ignore it, wait 200ms, get SIGKILL, and die.
         let args = Args::parse_from(vec![
             "argv0",
-            "--command_timeout_ms",
-            "100",
+            "--command_timeout",
+            "100ms",
             "--signal",
             "SIGTERM",
-            "--signal_timeout_ms",
-            "200",
+            "--signal_timeout",
+            "200ms",
             "sh",
             "-c",
             "trap '' TERM; sleep 2",
@@ -1093,6 +1152,17 @@ mod run_command {
         // It should be at least 300ms.
         // allow some buffer for CI flakiness, but definitely > 100ms.
         assert!(elapsed >= Duration::from_millis(250));
+        Ok(())
+    }
+
+    #[test]
+    fn test_kill_child_process_group_killpg_error() -> Result<(), Box<dyn std::error::Error>> {
+        let mut child = Command::new("true").spawn()?;
+        child.wait()?; // Reap the child.
+
+        let result = kill_child_process_group(&mut child, Some("SIGTERM"), Duration::from_secs(1));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("ESRCH"));
         Ok(())
     }
 }
@@ -1200,13 +1270,13 @@ mod make_command_to_run {
         );
         assert!(result_args.tmux_window_name.is_none());
         assert!(result_args.lockfile.is_none());
-        assert!(result_args.lock_timeout_ms.is_none());
-        assert!(result_args.command_timeout_ms.is_none());
+        assert!(result_args.lock_timeout.is_none());
+        assert!(result_args.command_timeout.is_none());
         assert!(result_args.directory.is_none());
-        assert_eq!(1000, result_args.signal_timeout_ms);
+        assert_eq!(Duration::from_secs(1), result_args.signal_timeout);
         assert!(!result_args.shell);
-        assert!(result_args.network_check_timeout_ms.is_none());
-        assert_eq!(1000, result_args.url_retry_delay_ms);
+        assert!(result_args.network_check_timeout.is_none());
+        assert_eq!(Duration::from_secs(1), result_args.url_retry_delay);
         assert_eq!(5, result_args.url_retry_count);
         Ok(())
     }
@@ -1215,12 +1285,15 @@ mod make_command_to_run {
     fn test_make_command_to_run_network_check() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec![
             "argv0",
-            "--network_check_timeout_ms=500",
+            "--network_check_timeout=500ms",
             "--network_check_url=http://example.com",
             "true",
         ]);
         let result_args = make_command_to_run(args);
-        assert_eq!(result_args.network_check_timeout_ms, Some(500));
+        assert_eq!(
+            result_args.network_check_timeout,
+            Some(Duration::from_millis(500))
+        );
         assert_eq!(result_args.network_check_url, "http://example.com");
         Ok(())
     }
@@ -1241,7 +1314,7 @@ mod make_command_to_run {
 
         let args = Args::parse_from(vec![
             "argv0",
-            "--network_check_timeout_ms=100",
+            "--network_check_timeout=100ms",
             "--network_check_url",
             &url,
             "true",
@@ -1267,7 +1340,7 @@ mod make_command_to_run {
         let url = server.url();
         let args = Args::parse_from(vec![
             "argv0",
-            "--network_check_timeout_ms=500",
+            "--network_check_timeout=500ms",
             "--network_check_url",
             &url,
             "true",
@@ -1286,12 +1359,31 @@ mod make_command_to_run {
         let url = server.url();
         let args = Args::parse_from(vec![
             "argv0",
-            "--network_check_timeout_ms=500",
+            "--network_check_timeout=500ms",
             "--network_check_url",
             &url,
             "true",
         ]);
 
+        let result = run_command(&args);
+        assert!(result.is_err());
+        assert!(
+            result
+                .err()
+                .ok_or("expected error")?
+                .contains("Network check failed")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_network_check_dns_failure() -> Result<(), Box<dyn std::error::Error>> {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--network_check_timeout=500ms",
+            "--network_check_url=http://invalid.domain.that.does.not.exist.example.com",
+            "true",
+        ]);
         let result = run_command(&args);
         assert!(result.is_err());
         assert!(
@@ -1311,7 +1403,7 @@ mod make_command_to_run {
         let url = server.url();
         let args = Args::parse_from(vec![
             "argv0",
-            "--network_check_timeout_ms=0",
+            "--network_check_timeout=0s",
             "--network_check_url",
             &url,
             "true",
@@ -1338,17 +1430,11 @@ mod make_command_to_run {
         let result_args = make_command_to_run(args);
         assert_eq!(result_args.command, original_args.command);
         assert_eq!(result_args.lockfile, original_args.lockfile);
-        assert_eq!(result_args.lock_timeout_ms, original_args.lock_timeout_ms);
-        assert_eq!(
-            result_args.command_timeout_ms,
-            original_args.command_timeout_ms
-        );
+        assert_eq!(result_args.lock_timeout, original_args.lock_timeout);
+        assert_eq!(result_args.command_timeout, original_args.command_timeout);
         assert_eq!(result_args.directory, original_args.directory);
         assert_eq!(result_args.shell, original_args.shell);
-        assert_eq!(
-            result_args.signal_timeout_ms,
-            original_args.signal_timeout_ms
-        );
+        assert_eq!(result_args.signal_timeout, original_args.signal_timeout);
         assert_eq!(result_args.caffeinate, original_args.caffeinate);
         Ok(())
     }
@@ -1404,7 +1490,7 @@ mod clap_test {
         let args = Args::parse_from(vec!["argv0", "echo"]);
         assert_eq!(vec!["echo".to_string()], args.command);
         assert!(!args.shell);
-        assert_eq!(1000, args.url_retry_delay_ms);
+        assert_eq!(Duration::from_secs(1), args.url_retry_delay);
         assert_eq!(5, args.url_retry_count);
 
         let args = Args::parse_from(vec![
@@ -1413,19 +1499,19 @@ mod clap_test {
             "asdf",
             "--lockfile",
             "qwerty",
-            "--lock_timeout_ms",
-            "123",
-            "--command_timeout_ms",
-            "456",
+            "--lock_timeout",
+            "123ms",
+            "--command_timeout",
+            "456ms",
             "--signal",
             "SIGTERM",
-            "--signal_timeout_ms",
-            "789",
+            "--signal_timeout",
+            "789ms",
             "--directory",
             "/no/where",
             "--shell",
-            "--url_retry_delay_ms",
-            "2000",
+            "--url_retry_delay",
+            "2s",
             "--url_retry_count",
             "10",
             "echo",
@@ -1434,12 +1520,12 @@ mod clap_test {
         ]);
         assert_eq!(Some("asdf"), args.tmux_window_name.as_deref());
         assert_eq!(Some("qwerty"), args.lockfile.as_deref());
-        assert_eq!(Some(123), args.lock_timeout_ms);
-        assert_eq!(Some(456), args.command_timeout_ms);
+        assert_eq!(Some(Duration::from_millis(123)), args.lock_timeout);
+        assert_eq!(Some(Duration::from_millis(456)), args.command_timeout);
         assert_eq!(Some("SIGTERM"), args.signal.as_deref());
-        assert_eq!(789, args.signal_timeout_ms);
+        assert_eq!(Duration::from_millis(789), args.signal_timeout);
         assert_eq!(Some("/no/where"), args.directory.as_deref());
-        assert_eq!(2000, args.url_retry_delay_ms);
+        assert_eq!(Duration::from_secs(2), args.url_retry_delay);
         assert_eq!(10, args.url_retry_count);
         assert_eq!(
             vec!["echo".to_string(), "foo".to_string(), "bar".to_string()],
@@ -1458,15 +1544,15 @@ mod clap_test {
 
     #[test]
     fn test_parse_args_default_signal() -> Result<(), Box<dyn std::error::Error>> {
-        let args = Args::parse_from(vec!["argv0", "--command_timeout_ms", "100", "echo", "foo"]);
+        let args = Args::parse_from(vec!["argv0", "--command_timeout", "100ms", "echo", "foo"]);
         assert_eq!(Some("SIGTERM"), args.signal.as_deref());
-        assert_eq!(1000, args.signal_timeout_ms);
+        assert_eq!(Duration::from_secs(1), args.signal_timeout);
         Ok(())
     }
 
     #[test]
     fn test_lock_timeout_requires_lockfile() -> Result<(), Box<dyn std::error::Error>> {
-        let result = Args::try_parse_from(vec!["argv0", "--lock_timeout_ms=100", "echo", "foo"]);
+        let result = Args::try_parse_from(vec!["argv0", "--lock_timeout=100ms", "echo", "foo"]);
         assert!(result.is_err());
         let err = result.err().ok_or("expected error")?;
         let error_msg = err.to_string();
@@ -1482,19 +1568,85 @@ mod clap_test {
         let err = result.err().ok_or("expected error")?;
         let error_msg = err.to_string();
         assert!(error_msg.contains("required"));
-        assert!(error_msg.contains("--command_timeout_ms"));
+        assert!(error_msg.contains("--command_timeout"));
         Ok(())
     }
 
     #[test]
     fn test_signal_timeout_requires_command_timeout_ms() -> Result<(), Box<dyn std::error::Error>> {
-        let result = Args::try_parse_from(vec!["argv0", "--signal_timeout_ms=100", "echo", "foo"]);
+        let result = Args::try_parse_from(vec!["argv0", "--signal_timeout=100ms", "echo", "foo"]);
         assert!(result.is_err());
         let err = result.err().ok_or("expected error")?;
         let error_msg = err.to_string();
         assert!(error_msg.contains("required"));
-        assert!(error_msg.contains("--command_timeout_ms"));
+        assert!(error_msg.contains("--command_timeout"));
         Ok(())
+    }
+
+    #[test]
+    fn test_invalid_lock_timeout_format() {
+        let result = Args::try_parse_from(vec![
+            "argv0",
+            "--lockfile=foo.lock",
+            "--lock_timeout=invalid",
+            "echo",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_command_timeout_format() {
+        let result = Args::try_parse_from(vec!["argv0", "--command_timeout=invalid", "echo"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_signal_timeout_format() {
+        let result = Args::try_parse_from(vec![
+            "argv0",
+            "--command_timeout=1s",
+            "--signal_timeout=invalid",
+            "echo",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_url_retry_delay_format() {
+        let result = Args::try_parse_from(vec!["argv0", "--url_retry_delay=invalid", "echo"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_network_check_timeout_format() {
+        let result = Args::try_parse_from(vec!["argv0", "--network_check_timeout=invalid", "echo"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_args_default() {
+        let default_args = Args::default();
+        assert!(!default_args.wait);
+        assert!(default_args.tmux_window_name.is_none());
+        assert!(default_args.lockfile.is_none());
+        assert!(default_args.lock_timeout.is_none());
+        assert!(default_args.command_timeout.is_none());
+        assert!(default_args.signal.is_none());
+        assert_eq!(default_args.signal_timeout, Duration::from_secs(1));
+        assert!(default_args.directory.is_none());
+        assert!(!default_args.shell);
+        assert!(default_args.success_url.is_none());
+        assert!(default_args.failure_url.is_none());
+        assert_eq!(default_args.url_retry_delay, Duration::from_secs(1));
+        assert_eq!(default_args.url_retry_count, 5);
+        assert!(!default_args.caffeinate);
+        assert!(default_args.network_check_timeout.is_none());
+        assert_eq!(
+            default_args.network_check_url,
+            "http://clients3.google.com/generate_204"
+        );
+        assert!(default_args.output_shell_completion.is_none());
+        assert!(default_args.command.is_empty());
     }
 }
 
@@ -1522,5 +1674,27 @@ mod push_opt_tests {
         let opt: Option<String> = None;
         push_opt(&mut vec, "--flag", opt);
         assert!(vec.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod duration_parsing_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_duration_valid() {
+        assert_eq!(parse_duration("1s"), Ok(Duration::from_secs(1)));
+        assert_eq!(parse_duration("500ms"), Ok(Duration::from_millis(500)));
+        assert_eq!(parse_duration("1.5s"), Ok(Duration::from_millis(1500)));
+        assert_eq!(parse_duration("2h"), Ok(Duration::from_secs(7200)));
+        assert_eq!(parse_duration("0"), Ok(Duration::from_secs(0)));
+        assert_eq!(parse_duration("0s"), Ok(Duration::from_secs(0)));
+    }
+
+    #[test]
+    fn test_parse_duration_invalid() {
+        assert!(parse_duration("invalid").is_err());
+        assert!(parse_duration("1s2ms").is_err());
+        assert!(parse_duration("-5s").is_err());
     }
 }

@@ -19,6 +19,7 @@ fs4 = "0.13.1"
 nix = { version = "0.31.2", features = ["signal"] }
 wait-timeout = "0.2.1"
 ureq = "3.3.0"
+fundu = "2.0.1"
 
 [dev-dependencies]
 tempfile = "3.27.0"
