@@ -1,6 +1,6 @@
 use clap::{CommandFactory, Parser};
 use clap_complete::{Shell, generate};
-use fs4::fs_std::FileExt;
+use fs4::FileExt;
 use nix::sys::signal::killpg;
 use nix::unistd::Pid;
 use std::env;
@@ -222,9 +222,9 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
             .truncate(false)
             .open(lock_filename)
             .map_err(|e| e.to_string())?;
-        match file.try_lock_exclusive() {
-            Ok(true) => return Ok(file),
-            Ok(false) => {
+        match FileExt::try_lock(&file) {
+            Ok(()) => return Ok(file),
+            Err(fs4::TryLockError::WouldBlock) => {
                 if start.elapsed() >= lock_timeout {
                     return Err(format!(
                         "Timeout waiting for lockfile after {lock_timeout:?}"
@@ -232,10 +232,10 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
-            Err(error_message) => {
-                // I can't test this without making try_lock_exclusive() fail, which looks
+            Err(fs4::TryLockError::Error(e)) => {
+                // I can't test this without making try_lock() fail, which looks
                 // ~impossible from reading the source.
-                return Err(error_message.to_string());
+                return Err(e.to_string());
             }
         }
     }
@@ -1237,7 +1237,7 @@ mod lock_file {
             .create(true)
             .truncate(false)
             .open(&lock_path)?;
-        lock1.lock_exclusive()?;
+        FileExt::lock(&lock1)?;
 
         let start = Instant::now();
         let lock2 = std::thread::scope(|s| {
