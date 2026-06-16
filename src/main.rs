@@ -51,47 +51,8 @@ require the flag they are indented under.";
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about=LONG_ABOUT)]
 struct Args {
-    /// Wait for the user to press enter after the command has finished.
-    #[arg(long = "wait")]
-    wait: bool,
-
-    /// The name of the tmux window to use.
-    #[arg(long = "tmux_window_name")]
-    tmux_window_name: Option<String>,
-
-    /// The path to the lockfile.
-    #[arg(long = "lockfile")]
-    lockfile: Option<String>,
-
-    /// The lock_timeout duration.
-    #[arg(long = "lock_timeout", requires = "lockfile", value_parser = parse_duration)]
-    lock_timeout: Option<Duration>,
-
-    /// The command_timeout duration.
-    #[arg(long = "command_timeout", value_parser = parse_duration)]
-    command_timeout: Option<Duration>,
-
-    /// The signal to send to the command if it times out. Can be a signal
-    /// name (e.g. "SIGTERM") or a signal number (e.g. "15").
-    /// Defaults to SIGINT (2) if not specified.
-    #[arg(
-        long = "signal",
-        requires = "command_timeout",
-        default_value = "SIGTERM"
-    )]
-    signal: Option<String>,
-
-    /// The time to wait for the child to exit after sending signal.
-    #[arg(
-        long = "signal_timeout",
-        requires = "command_timeout",
-        default_value = "1s",
-        value_parser = parse_duration
-    )]
-    signal_timeout: Duration,
-
     /// The directory to run the command in.
-    #[arg(long = "directory")]
+    #[arg(long = "directory", help_heading = "Execution & Environment")]
     directory: Option<String>,
 
     /// Prepend `["sh", "-c"]` to the command.  Doesn't otherwise modify the
@@ -102,44 +63,94 @@ struct Args {
     ///   "sh" "-c" "ls" "foo" "bar"
     /// *not*:
     ///   "sh" "-c" "ls foo bar"
-    #[arg(long = "shell", verbatim_doc_comment)]
+    #[arg(
+        long = "shell",
+        verbatim_doc_comment,
+        help_heading = "Execution & Environment"
+    )]
     shell: bool,
 
-    /// Ping this URL on success, e.g. https://hc-ping.com/....
-    #[arg(long = "success_url")]
-    success_url: Option<String>,
-
-    /// Ping this URL on failure, e.g. https://hc-ping.com/....
-    #[arg(long = "failure_url")]
-    failure_url: Option<String>,
-
-    /// Delay between retries when pinging success/failure URLs.
-    #[arg(long = "url_retry_delay", default_value = "1s", value_parser = parse_duration)]
-    url_retry_delay: Duration,
-
-    /// Number of retries when pinging success/failure URLs.
-    #[arg(long = "url_retry_count", default_value_t = 5)]
-    url_retry_count: u32,
+    /// Run the command in a new tmux window with the specified name.
+    #[arg(long = "tmux_window_name", help_heading = "Execution & Environment")]
+    tmux_window_name: Option<String>,
 
     /// Prevent the system from sleeping while the command is running.
-    #[arg(long = "caffeinate")]
+    #[arg(long = "caffeinate", help_heading = "Execution & Environment")]
     caffeinate: bool,
 
     /// Wait for network connectivity before running the command.
     /// 0s: wait forever. Otherwise: timeout duration.
-    #[arg(long = "network_check_timeout", value_parser = parse_duration)]
+    #[arg(long = "network_check_timeout", value_parser = parse_duration, help_heading = "Network & Connectivity")]
     network_check_timeout: Option<Duration>,
 
     /// URL to check for network connectivity.
     #[arg(
         long = "network_check_url",
         hide = true,
-        default_value = "http://clients3.google.com/generate_204"
+        default_value = "http://clients3.google.com/generate_204",
+        help_heading = "Network & Connectivity"
     )]
     network_check_url: String,
 
+    /// The path to the lockfile.
+    #[arg(long = "lockfile", help_heading = "Exclusivity & Locking")]
+    lockfile: Option<String>,
+
+    /// The lock_timeout duration.
+    #[arg(long = "lock_timeout", requires = "lockfile", value_parser = parse_duration, help_heading = "Exclusivity & Locking")]
+    lock_timeout: Option<Duration>,
+
+    /// The command_timeout duration.
+    #[arg(long = "command_timeout", value_parser = parse_duration, help_heading = "Timeouts & Signal Control")]
+    command_timeout: Option<Duration>,
+
+    /// The signal to send to the command if it times out. Can be a signal
+    /// name (e.g. "SIGTERM") or a signal number (e.g. "15").
+    /// Defaults to SIGINT (2) if not specified.
+    #[arg(
+        long = "signal",
+        requires = "command_timeout",
+        default_value = "SIGTERM",
+        help_heading = "Timeouts & Signal Control"
+    )]
+    signal: Option<String>,
+
+    /// The time to wait for the child to exit after sending signal.
+    #[arg(
+        long = "signal_timeout",
+        requires = "command_timeout",
+        default_value = "1s",
+        value_parser = parse_duration,
+        help_heading = "Timeouts & Signal Control"
+    )]
+    signal_timeout: Duration,
+
+    /// Ping this URL on success, e.g. https://hc-ping.com/....
+    #[arg(long = "success_url", help_heading = "Notifications & Hooks")]
+    success_url: Option<String>,
+
+    /// Ping this URL on failure, e.g. https://hc-ping.com/....
+    #[arg(long = "failure_url", help_heading = "Notifications & Hooks")]
+    failure_url: Option<String>,
+
+    /// Number of retries when pinging success/failure URLs.
+    #[arg(
+        long = "url_retry_count",
+        default_value_t = 5,
+        help_heading = "Notifications & Hooks"
+    )]
+    url_retry_count: u32,
+
+    /// Delay between retries when pinging success/failure URLs.
+    #[arg(long = "url_retry_delay", default_value = "1s", value_parser = parse_duration, help_heading = "Notifications & Hooks")]
+    url_retry_delay: Duration,
+
+    /// Wait for the user to press enter after the command has finished.
+    #[arg(long = "wait", help_heading = "User Interaction")]
+    wait: bool,
+
     /// Output shell completion code for the specified shell.
-    #[arg(long = "output_shell_completion")]
+    #[arg(long = "output_shell_completion", help_heading = "Shell Completion")]
     output_shell_completion: Option<Shell>,
 
     /// The command to run.
@@ -153,22 +164,22 @@ struct Args {
 impl Default for Args {
     fn default() -> Self {
         Self {
-            wait: false,
+            directory: None,
+            shell: false,
             tmux_window_name: None,
+            caffeinate: false,
+            network_check_timeout: None,
+            network_check_url: "http://clients3.google.com/generate_204".to_string(),
             lockfile: None,
             lock_timeout: None,
             command_timeout: None,
             signal: None,
             signal_timeout: Duration::from_secs(1),
-            directory: None,
-            shell: false,
             success_url: None,
             failure_url: None,
-            url_retry_delay: Duration::from_secs(1),
             url_retry_count: 5,
-            caffeinate: false,
-            network_check_timeout: None,
-            network_check_url: "http://clients3.google.com/generate_204".to_string(),
+            url_retry_delay: Duration::from_secs(1),
+            wait: false,
             output_shell_completion: None,
             command: Vec::new(),
         }
