@@ -6,6 +6,7 @@ use nix::unistd::Pid;
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::io;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
@@ -215,13 +216,14 @@ fn ping_url(url: &str, retry_count: u32, retry_delay: Duration) {
 
 fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, String> {
     let start = Instant::now();
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .truncate(false)
+        .open(lock_filename)
+        .map_err(|e| e.to_string())?;
     loop {
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(lock_filename)
-            .map_err(|e| e.to_string())?;
         match file.try_lock_exclusive() {
             Ok(true) => return Ok(file),
             Ok(false) => {
@@ -1714,5 +1716,16 @@ mod duration_parsing_tests {
         assert!(parse_duration("invalid").is_err());
         assert!(parse_duration("1s2ms").is_err());
         assert!(parse_duration("-5s").is_err());
+    }
+
+    #[test]
+    fn test_lock_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let lock_path = temp_dir.path().join("test.lock");
+        let _file = lock_file(&lock_path, Duration::from_millis(100)).unwrap();
+        let metadata = std::fs::metadata(&lock_path).unwrap();
+        let mode = metadata.permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "Lockfile permissions should be 0o600, but were 0o{:o}", mode & 0o777);
     }
 }
