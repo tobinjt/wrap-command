@@ -46,7 +46,14 @@ const LONG_ABOUT: &str = "A program that wraps a command, optionally:
   - 0s means wait forever, otherwise timeout after that duration.
 - waiting for the user to press enter after the command has finished (--wait)
 Any combination of unindented flags is supported.  The indented flags
-require the flag they are indented under.";
+require the flag they are indented under.
+
+Timeout / Duration Formats:
+  Timeouts can be specified as a number followed by an optional unit:
+  - ns, us (or µs), ms, s, m, h, d, w, M, y (e.g., 500ms, 1.5s, 2h).
+  - If no unit is specified, seconds (s) is assumed (e.g., 10 is parsed as 10s).
+  - Standard floating-point values are supported (e.g., 1.5s, .5h, 2e-3s).
+  - Multiple units or negative values are not supported (e.g., 1s2ms, -5s are invalid).";
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about=LONG_ABOUT)]
