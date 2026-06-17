@@ -37,6 +37,9 @@ const LONG_ABOUT: &str = "A program that wraps a command, optionally:
     can be specified with --signal_timeout, it defaults to 1s.
     If the child process is still running after this time, it is
     killed with SIGKILL (9).
+- retrying the command if it fails (--retries)
+  - the delay between retries can be specified with --retry_delay.
+  - alternatively, wait for the user to press enter before retrying with --retry_wait.
 - running the command from a different directory (--directory)
 - passing the command to `sh -c` so shell metacharacters like && or
   $() can be used (--shell)
@@ -85,6 +88,33 @@ struct Args {
     /// Prevent the system from sleeping while the command is running.
     #[arg(long = "caffeinate", help_heading = "Execution & Environment")]
     caffeinate: bool,
+
+    /// Number of retries when running the command.
+    #[arg(long = "retries", help_heading = "Execution & Environment")]
+    retries: Option<u32>,
+
+    /// Delay between retries when running the command.
+    #[arg(
+        long = "retry_delay",
+        requires = "retries",
+        value_parser = parse_duration,
+        conflicts_with = "retry_wait",
+        help_heading = "Execution & Environment"
+    )]
+    retry_delay: Option<Duration>,
+
+    /// Wait for the user to press enter before retrying the command.
+    #[arg(
+        long = "retry_wait",
+        requires = "retries",
+        conflicts_with = "retry_delay",
+        help_heading = "Execution & Environment"
+    )]
+    retry_wait: bool,
+
+    /// Wait for the user to press enter after the command has finished.
+    #[arg(long = "wait", help_heading = "Execution & Environment")]
+    wait: bool,
 
     /// Wait for network connectivity before running the command.
     /// 0s: wait forever. Otherwise: timeout duration.
@@ -153,10 +183,6 @@ struct Args {
     #[arg(long = "url_retry_delay", default_value = "1s", value_parser = parse_duration, help_heading = "Notifications & Hooks")]
     url_retry_delay: Duration,
 
-    /// Wait for the user to press enter after the command has finished.
-    #[arg(long = "wait", help_heading = "User Interaction")]
-    wait: bool,
-
     /// Output shell completion code for the specified shell.
     #[arg(long = "output_shell_completion", help_heading = "Shell Completion")]
     output_shell_completion: Option<Shell>,
@@ -176,6 +202,9 @@ impl Default for Args {
             shell: false,
             tmux_window_name: None,
             caffeinate: false,
+            retries: None,
+            retry_delay: None,
+            retry_wait: false,
             network_check_timeout: None,
             network_check_url: "http://clients3.google.com/generate_204".to_string(),
             lockfile: None,
@@ -274,6 +303,15 @@ fn make_tmux_command(args: Args) -> Vec<String> {
         "--lock_timeout",
         args.lock_timeout.map(|d| format!("{}ms", d.as_millis())),
     );
+    push_opt(&mut full_command, "--retries", args.retries);
+    push_opt(
+        &mut full_command,
+        "--retry_delay",
+        args.retry_delay.map(|d| format!("{}ms", d.as_millis())),
+    );
+    if args.retry_wait {
+        full_command.push("--retry_wait".to_string());
+    }
     if args.command_timeout.is_some() {
         push_opt(
             &mut full_command,
@@ -376,14 +414,44 @@ fn acquire_lock(args: &Args) -> Result<Option<File>, String> {
     }
 }
 
+#[allow(dead_code)]
 fn run_command(args: &Args) -> Result<i32, String> {
+    run_command_impl(args, &mut io::stdin().lock(), &mut io::stdout())
+}
+
+fn run_command_impl<R: io::BufRead, W: io::Write>(
+    args: &Args,
+    reader: &mut R,
+    writer: &mut W,
+) -> Result<i32, String> {
     let _lock_file = acquire_lock(args)?;
 
     if let Some(timeout) = args.network_check_timeout {
         check_network_connectivity(&args.network_check_url, timeout)?;
     }
 
-    manage_child_process(args)
+    let retries = args.retries.unwrap_or(0);
+    let delay = args.retry_delay.unwrap_or(Duration::ZERO);
+
+    let mut attempt = 0;
+    loop {
+        match manage_child_process(args) {
+            Ok(0) => return Ok(0),
+            res => {
+                if attempt >= retries {
+                    return res;
+                }
+                if args.retry_wait {
+                    let _ = writeln!(writer, "Press Enter to retry...");
+                    let mut _input = String::new();
+                    let _ = reader.read_line(&mut _input);
+                } else {
+                    std::thread::sleep(delay);
+                }
+                attempt += 1;
+            }
+        }
+    }
 }
 
 fn manage_child_process(args: &Args) -> Result<i32, String> {
@@ -452,7 +520,7 @@ fn realmain_impl<R: io::BufRead, W: io::Write>(args: Args, reader: &mut R, write
     }
     let args_for_command = make_command_to_run(args);
 
-    let exit_code = match run_command(&args_for_command) {
+    let exit_code = match run_command_impl(&args_for_command, reader, writer) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -665,6 +733,64 @@ mod make_tmux_command {
                 &current_exe,
                 "--network_check_url",
                 "http://custom.url",
+                "echo",
+                "hello"
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_make_tmux_command_retry_args() -> Result<(), Box<dyn std::error::Error>> {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name=retry_window",
+            "--retries=5",
+            "--retry_delay=1500ms",
+            "echo",
+            "hello",
+        ]);
+        let result = make_tmux_command(args);
+        let current_exe = env::current_exe()?.display().to_string();
+        assert_eq!(
+            result,
+            vec![
+                "tmux",
+                "new-window",
+                "-d",
+                "-n",
+                "retry_window",
+                &current_exe,
+                "--retries",
+                "5",
+                "--retry_delay",
+                "1500ms",
+                "echo",
+                "hello"
+            ]
+        );
+
+        let args_wait = Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name=retry_window_wait",
+            "--retries=5",
+            "--retry_wait",
+            "echo",
+            "hello",
+        ]);
+        let result_wait = make_tmux_command(args_wait);
+        assert_eq!(
+            result_wait,
+            vec![
+                "tmux",
+                "new-window",
+                "-d",
+                "-n",
+                "retry_window_wait",
+                &current_exe,
+                "--retries",
+                "5",
+                "--retry_wait",
                 "echo",
                 "hello"
             ]
@@ -1185,6 +1311,81 @@ mod run_command {
         assert!(result.unwrap_err().contains("ESRCH"));
         Ok(())
     }
+
+    #[test]
+    fn test_run_command_retry_exhausted() -> Result<(), Box<dyn std::error::Error>> {
+        let args = Args::parse_from(vec!["argv0", "--retries=2", "--retry_delay=10ms", "false"]);
+        let start = Instant::now();
+        let result = run_command(&args);
+        let elapsed = start.elapsed();
+
+        assert_eq!(result?, 1);
+        assert!(elapsed >= Duration::from_millis(20));
+        Ok(())
+    }
+
+    #[test]
+    fn test_run_command_retry_wait() -> Result<(), Box<dyn std::error::Error>> {
+        let args = Args::parse_from(vec!["argv0", "--retries=2", "--retry_wait", "false"]);
+        let mut buffer = Vec::new();
+        let mut reader = std::io::Cursor::new(b"\n\n");
+        let result = run_command_impl(&args, &mut reader, &mut buffer);
+
+        assert_eq!(result?, 1);
+        let output = String::from_utf8(buffer)?;
+        assert!(output.contains("Press Enter to retry..."));
+        assert_eq!(reader.position(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_run_command_retry_success_after_failure() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        let marker_file = temp_dir.path().join("marker");
+        std::fs::write(&marker_file, "exists")?;
+
+        let marker_path_str = marker_file.to_str().ok_or("invalid path")?;
+
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--retries=1",
+            "--retry_delay=5ms",
+            "sh",
+            "-c",
+            &format!(
+                "if [ -f {marker_path_str} ]; then rm {marker_path_str}; exit 1; else exit 0; fi"
+            ),
+        ]);
+
+        let result = run_command(&args);
+        assert_eq!(result?, 0);
+        assert!(!marker_file.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_run_command_retry_no_retry_on_success() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        let counter_file = temp_dir.path().join("counter");
+        std::fs::write(&counter_file, "0")?;
+        let counter_path_str = counter_file.to_str().ok_or("invalid path")?;
+
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--retries=3",
+            "--retry_delay=1ms",
+            "sh",
+            "-c",
+            &format!("val=$(cat {counter_path_str}); echo $((val+1)) > {counter_path_str}; exit 0"),
+        ]);
+
+        let result = run_command(&args);
+        assert_eq!(result?, 0);
+
+        let count: u32 = std::fs::read_to_string(&counter_file)?.trim().parse()?;
+        assert_eq!(count, 1);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1298,6 +1499,9 @@ mod make_command_to_run {
         assert!(result_args.network_check_timeout.is_none());
         assert_eq!(Duration::from_secs(1), result_args.url_retry_delay);
         assert_eq!(5, result_args.url_retry_count);
+        assert!(result_args.retries.is_none());
+        assert!(result_args.retry_delay.is_none());
+        assert!(!result_args.retry_wait);
         Ok(())
     }
 
@@ -1644,6 +1848,54 @@ mod clap_test {
     }
 
     #[test]
+    fn test_retry_delay_and_retry_wait_conflict() {
+        let result = Args::try_parse_from(vec![
+            "argv0",
+            "--retries=3",
+            "--retry_delay=1s",
+            "--retry_wait",
+            "echo",
+        ]);
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.to_string().contains("cannot be used with"));
+    }
+
+    #[test]
+    fn test_retry_delay_requires_retries() {
+        let result = Args::try_parse_from(vec!["argv0", "--retry_delay=1s", "echo"]);
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.to_string().contains("required"));
+    }
+
+    #[test]
+    fn test_retry_wait_requires_retries() {
+        let result = Args::try_parse_from(vec!["argv0", "--retry_wait", "echo"]);
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.to_string().contains("required"));
+    }
+
+    #[test]
+    fn test_invalid_retry_delay_format() {
+        let result = Args::try_parse_from(vec![
+            "argv0",
+            "--retries=3",
+            "--retry_delay=invalid",
+            "echo",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_retry_wait_format() {
+        let result =
+            Args::try_parse_from(vec!["argv0", "--retries=3", "--retry_wait=invalid", "echo"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_args_default() {
         let default_args = Args::default();
         assert!(!default_args.wait);
@@ -1655,6 +1907,9 @@ mod clap_test {
         assert_eq!(default_args.signal_timeout, Duration::from_secs(1));
         assert!(default_args.directory.is_none());
         assert!(!default_args.shell);
+        assert!(default_args.retries.is_none());
+        assert!(default_args.retry_delay.is_none());
+        assert!(!default_args.retry_wait);
         assert!(default_args.success_url.is_none());
         assert!(default_args.failure_url.is_none());
         assert_eq!(default_args.url_retry_delay, Duration::from_secs(1));
