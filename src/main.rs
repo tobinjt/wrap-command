@@ -62,15 +62,19 @@ Timeout / Duration Formats:
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about=LONG_ABOUT)]
 struct Args {
-    /// The directory to run the command in.
+    /// The directory to run the command in. wrap-command itself doesn't change directory, it's just
+    /// changed for the child process, so using --directory doesn't affect the location of the lock
+    /// file. When retries are used the directory is changed for each new child process, so if the
+    /// directory is changed, e.g. by replacing it with a symlink, a later child process would run
+    /// in a different directory.
     #[arg(long = "directory", help_heading = "Execution & Environment")]
     directory: Option<String>,
 
-    /// Prepend `["sh", "-c"]` to the command.  Doesn't otherwise modify the
+    /// Prepend `"sh" "-c"` to the command.  Doesn't otherwise change the
     /// command, in particular if you use `--shell` with multiple arguments they
-    /// will be passed as multiple arguments to `sh`. E.g.
+    /// will be passed as separate arguments to `sh`. E.g.
     ///   "wrap-command" "--shell" "ls" "foo" "bar"
-    /// will result in:
+    /// results in:
     ///   "sh" "-c" "ls" "foo" "bar"
     /// *not*:
     ///   "sh" "-c" "ls foo bar"
@@ -81,7 +85,9 @@ struct Args {
     )]
     shell: bool,
 
-    /// Run the command in a new tmux window with the specified name.
+    /// Run the command in a new tmux window with the specified name. This is implemented by running
+    /// `tmux new-window -d -n <window_name> /path/to/wrap-command <reconstructed_flags>
+    /// <target_command>`.
     #[arg(long = "tmux_window_name", help_heading = "Execution & Environment")]
     tmux_window_name: Option<String>,
 
