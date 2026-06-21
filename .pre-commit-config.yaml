@@ -73,7 +73,7 @@ repos:
   # managed-by-populate-pre-commit end: readme-toc.yaml
   # managed-by-populate-pre-commit start: rust.yaml
   - repo: https://github.com/tobinjt/rust-pre-commit-checks
-    rev: v1.2.0
+    rev: v1.3.1
     hooks:
     - id: cargo-check
     - id: cargo-clippy
