@@ -24,3 +24,8 @@ fundu = "2.0.1"
 [dev-dependencies]
 tempfile = "3.27.0"
 mockito = "1.7"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
