@@ -448,7 +448,17 @@ fn run_command_impl<R: io::BufRead, W: io::Write>(
                     return res;
                 }
                 if args.retry_wait {
-                    let _ = writeln!(writer, "Press Enter to retry...");
+                    let cmd_str = args.command.join(" ");
+                    let dir_str = match &args.directory {
+                        Some(d) => d.clone(),
+                        None => env::current_dir()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|_| ".".to_string()),
+                    };
+                    let _ = writeln!(
+                        writer,
+                        "Press Enter to retry running '{cmd_str}' in '{dir_str}'..."
+                    );
                     let mut _input = String::new();
                     let _ = reader.read_line(&mut _input);
                 } else {
@@ -1339,8 +1349,31 @@ mod run_command {
 
         assert_eq!(result?, 1);
         let output = String::from_utf8(buffer)?;
-        assert!(output.contains("Press Enter to retry..."));
+        let current_dir = env::current_dir()?.display().to_string();
+        assert!(output.contains(&format!(
+            "Press Enter to retry running 'false' in '{current_dir}'..."
+        )));
         assert_eq!(reader.position(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_run_command_retry_wait_custom_directory() -> Result<(), Box<dyn std::error::Error>> {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--retries=1",
+            "--retry_wait",
+            "--directory=/tmp",
+            "false",
+        ]);
+        let mut buffer = Vec::new();
+        let mut reader = std::io::Cursor::new(b"\n");
+        let result = run_command_impl(&args, &mut reader, &mut buffer);
+
+        assert_eq!(result?, 1);
+        let output = String::from_utf8(buffer)?;
+        assert!(output.contains("Press Enter to retry running 'false' in '/tmp'..."));
+        assert_eq!(reader.position(), 1);
         Ok(())
     }
 
