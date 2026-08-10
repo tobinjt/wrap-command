@@ -1120,7 +1120,10 @@ mod realmain {
         );
         assert_eq!(result, 0);
         let output = String::from_utf8(buffer)?;
-        assert!(output.contains("_wrap-command"));
+        assert!(
+            output.contains("_wrap__command"),
+            "Expected to find `_wrap__command` in `{output}`"
+        );
         Ok(())
     }
 
