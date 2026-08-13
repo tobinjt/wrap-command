@@ -84,7 +84,7 @@ wrap-command --command_timeout 30s --signal SIGINT --signal_timeout 5s cargo tes
 
 Retry a command if it fails (returns a non-zero exit code).
 
-- `--retries <COUNT>`: The number of times to retry.
+- `--retries <COUNT>`: The number of times to retry (-1 for unlimited).
 - `--retry_delay <DURATION>`: How long to wait between retries (can't be used
   with `--retry_wait`).
 - `--retry_wait`: Wait for the user to press Enter before retrying (can't be

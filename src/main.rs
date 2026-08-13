@@ -26,6 +26,19 @@ fn parse_duration(arg: &str) -> Result<Duration, String> {
     fundu::parse_duration(arg).map_err(|e| e.to_string())
 }
 
+fn parse_retries(arg: &str) -> Result<i32, String> {
+    let val: i32 = arg
+        .parse()
+        .map_err(|_| format!("'{arg}' is not a valid integer"))?;
+    if val < -1 {
+        Err(format!(
+            "retries must be -1 (unlimited) or a non-negative integer, got {val}"
+        ))
+    } else {
+        Ok(val)
+    }
+}
+
 const LONG_ABOUT: &str = "A program that wraps a command, optionally:
 - using a lock to ensure only one instance is running (--lockfile)
   - either failing immediately if the lock is held or waiting for a
@@ -37,7 +50,7 @@ const LONG_ABOUT: &str = "A program that wraps a command, optionally:
     can be specified with --signal_timeout, it defaults to 1s.
     If the child process is still running after this time, it is
     killed with SIGKILL (9).
-- retrying the command if it fails (--retries)
+- retrying the command if it fails (--retries, -1 for unlimited)
   - the delay between retries can be specified with --retry_delay.
   - alternatively, wait for the user to press enter before retrying with --retry_wait.
 - running the command from a different directory (--directory)
@@ -95,9 +108,14 @@ struct Args {
     #[arg(long = "caffeinate", help_heading = "Execution & Environment")]
     caffeinate: bool,
 
-    /// Number of retries when running the command.
-    #[arg(long = "retries", help_heading = "Execution & Environment")]
-    retries: Option<u32>,
+    /// Number of retries when running the command. Use -1 for unlimited retries.
+    #[arg(
+        long = "retries",
+        allow_hyphen_values = true,
+        value_parser = parse_retries,
+        help_heading = "Execution & Environment"
+    )]
+    retries: Option<i32>,
 
     /// Delay between retries when running the command.
     #[arg(
@@ -439,12 +457,12 @@ fn run_command_impl<R: io::BufRead, W: io::Write>(
     let retries = args.retries.unwrap_or(0);
     let delay = args.retry_delay.unwrap_or(Duration::ZERO);
 
-    let mut attempt = 0;
+    let mut attempt: u64 = 0;
     loop {
         match manage_child_process(args) {
             Ok(0) => return Ok(0),
             res => {
-                if attempt >= retries {
+                if retries != -1 && attempt >= retries as u64 {
                     return res;
                 }
                 if args.retry_wait {
@@ -1428,6 +1446,32 @@ mod run_command {
         assert_eq!(count, 1);
         Ok(())
     }
+
+    #[test]
+    fn test_run_command_retry_unlimited() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        let counter_file = temp_dir.path().join("counter");
+        std::fs::write(&counter_file, "0")?;
+        let counter_path_str = counter_file.to_str().ok_or("invalid path")?;
+
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--retries=-1",
+            "--retry_delay=1ms",
+            "sh",
+            "-c",
+            &format!(
+                "val=$(cat {counter_path_str}); echo $((val+1)) > {counter_path_str}; if [ $val -lt 3 ]; then exit 1; else exit 0; fi"
+            ),
+        ]);
+
+        let result = run_command(&args);
+        assert_eq!(result?, 0);
+
+        let count: u32 = std::fs::read_to_string(&counter_file)?.trim().parse()?;
+        assert_eq!(count, 4);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1934,6 +1978,27 @@ mod clap_test {
     fn test_invalid_retry_wait_format() {
         let result =
             Args::try_parse_from(vec!["argv0", "--retries=3", "--retry_wait=invalid", "echo"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_retries_unlimited_parsing() {
+        let args = Args::parse_from(vec!["argv0", "--retries=-1", "echo"]);
+        assert_eq!(args.retries, Some(-1));
+
+        let args_space = Args::parse_from(vec!["argv0", "--retries", "-1", "echo"]);
+        assert_eq!(args_space.retries, Some(-1));
+    }
+
+    #[test]
+    fn test_retries_negative_invalid() {
+        let result = Args::try_parse_from(vec!["argv0", "--retries=-2", "echo"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_retries_invalid_string() {
+        let result = Args::try_parse_from(vec!["argv0", "--retries=invalid", "echo"]);
         assert!(result.is_err());
     }
 
