@@ -7,7 +7,7 @@ use std::env;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -276,13 +276,14 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
             .truncate(false)
             .mode(0o600)
             .open(lock_filename)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Failed to open lockfile '{}': {e}", lock_filename.display()))?;
         match FileExt::try_lock(&file) {
             Ok(()) => return Ok(file),
             Err(fs4::TryLockError::WouldBlock) => {
                 if start.elapsed() >= lock_timeout {
                     return Err(format!(
-                        "Timeout waiting for lockfile after {lock_timeout:?}"
+                        "Timeout waiting for lockfile '{}' after {lock_timeout:?}",
+                        lock_filename.display()
                     ));
                 }
                 std::thread::sleep(Duration::from_millis(100));
@@ -290,7 +291,7 @@ fn lock_file(lock_filename: &Path, lock_timeout: Duration) -> Result<File, Strin
             Err(fs4::TryLockError::Error(e)) => {
                 // I can't test this without making try_lock() fail, which looks
                 // ~impossible from reading the source.
-                return Err(e.to_string());
+                return Err(format!("Failed to lock '{}': {e}", lock_filename.display()));
             }
         }
     }
@@ -405,25 +406,28 @@ fn kill_child_process_group(
         .expect("internal error: missing signal name")
         .parse()
         .map_err(|e| format!("Invalid signal: {e}"))?;
-    println!("signal: {}", signal);
     // I can't test this without causing killpg() to fail, which would require
     // dependency injection I guess.  Maybe I could inject `Command::new` instead?
-    killpg(pgid, signal).map_err(|e| e.to_string())?;
+    killpg(pgid, signal)
+        .map_err(|e| format!("Failed to send signal {signal} to process group {pgid}: {e}"))?;
 
     // I can't test this without causing wait_timeout() to fail, which would require
     // dependency injection I guess.  Maybe I could inject `Command::new` instead?
     match child
         .wait_timeout(signal_timeout)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("Failed to wait for process group {pgid}: {e}"))?
     {
         Some(_) => Ok(()),
         None => {
             // I can't test this without causing killpg() to fail, which would require
             // dependency injection I guess.  Maybe I could inject `Command::new` instead?
-            killpg(pgid, nix::sys::signal::Signal::SIGKILL).map_err(|e| e.to_string())?;
+            killpg(pgid, nix::sys::signal::Signal::SIGKILL)
+                .map_err(|e| format!("Failed to send SIGKILL to process group {pgid}: {e}"))?;
             // I can't test this without causing wait() to fail, which would require
             // dependency injection I guess.  Maybe I could inject `Command::new` instead?
-            child.wait().map_err(|e| e.to_string())?;
+            child
+                .wait()
+                .map_err(|e| format!("Failed to wait for process group {pgid}: {e}"))?;
             Ok(())
         }
     }
@@ -492,7 +496,14 @@ fn manage_child_process(args: &Args) -> Result<i32, String> {
     let mut child_command = Command::new(&args.command[0]);
     child_command.args(&args.command[1..]);
     if let Some(dir) = &args.directory {
-        child_command.current_dir(dir);
+        let dir_path = Path::new(dir);
+        if !dir_path.exists() {
+            return Err(format!("Working directory '{dir}' does not exist"));
+        }
+        if !dir_path.is_dir() {
+            return Err(format!("Working directory '{dir}' is not a directory"));
+        }
+        child_command.current_dir(dir_path);
     }
     child_command.process_group(0);
 
@@ -504,20 +515,38 @@ fn manage_child_process(args: &Args) -> Result<i32, String> {
     let exit_status = match timeout {
         // I can't test this without causing wait_timeout() to fail, which would require
         // dependency injection I guess.  Maybe I could inject `Command::new` instead?
-        Some(duration) => match child.wait_timeout(duration).map_err(|e| e.to_string())? {
+        Some(duration) => match child
+            .wait_timeout(duration)
+            .map_err(|e| format!("Failed to wait for '{}': {e}", args.command[0]))?
+        {
             Some(status) => Ok(status),
             None => {
                 kill_child_process_group(&mut child, args.signal.as_deref(), args.signal_timeout)?;
-                Err(format!("Command timed out after {duration:?}"))
+                Err(format!(
+                    "Command '{}' timed out after {duration:?}",
+                    args.command[0]
+                ))
             }
         },
         // I can't test this without causing wait() to fail, which would require
         // dependency injection I guess.  Maybe I could inject `Command::new` instead?
-        None => child.wait().map_err(|e| e.to_string()),
+        None => child
+            .wait()
+            .map_err(|e| format!("Failed to wait for '{}': {e}", args.command[0])),
     }?;
-    exit_status
-        .code()
-        .ok_or_else(|| "Command terminated by signal".to_string())
+    if let Some(code) = exit_status.code() {
+        Ok(code)
+    } else if let Some(signal) = exit_status.signal() {
+        Err(format!(
+            "Command '{}' terminated by signal {signal}",
+            args.command[0]
+        ))
+    } else {
+        Err(format!(
+            "Command '{}' terminated by signal",
+            args.command[0]
+        ))
+    }
 }
 
 fn make_command_to_run(args: Args) -> Args {
@@ -1209,7 +1238,7 @@ mod run_command {
         assert!(result.is_err());
         assert_eq!(
             result.err().ok_or("expected error")?,
-            "Command timed out after 100ms"
+            "Command 'sleep' timed out after 100ms"
         );
         Ok(())
     }
@@ -1258,6 +1287,38 @@ mod run_command {
     }
 
     #[test]
+    fn test_run_command_directory_does_not_exist() -> Result<(), Box<dyn std::error::Error>> {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--directory",
+            "/path/does/not/exist_12345",
+            "echo",
+            "hello",
+        ]);
+        let result = run_command(&args);
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().ok_or("expected error")?,
+            "Working directory '/path/does/not/exist_12345' does not exist"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_run_command_directory_not_a_directory() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_file = NamedTempFile::new()?;
+        let file_path = temp_file.path().to_str().ok_or("invalid path")?;
+        let args = Args::parse_from(vec!["argv0", "--directory", file_path, "echo", "hello"]);
+        let result = run_command(&args);
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().ok_or("expected error")?,
+            format!("Working directory '{file_path}' is not a directory")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_run_command_not_found() -> Result<(), Box<dyn std::error::Error>> {
         let args = Args::parse_from(vec!["argv0", "command_that_does_not_exist"]);
         let result = run_command(&args);
@@ -1275,7 +1336,7 @@ mod run_command {
         assert!(result.is_err());
         assert_eq!(
             result.err().ok_or("expected error")?,
-            "Command terminated by signal"
+            "Command 'bash' terminated by signal 15"
         );
         Ok(())
     }
@@ -1328,7 +1389,7 @@ mod run_command {
         assert!(result.is_err());
         assert_eq!(
             result.err().ok_or("expected error")?,
-            "Command timed out after 100ms"
+            "Command 'sh' timed out after 100ms"
         );
         // Elapsed should be roughly 100ms (command timeout) + 200ms (signal timeout)
         // It should be at least 300ms.
@@ -1492,12 +1553,9 @@ mod lock_file {
             .map_err(|_| "thread panicked")?;
 
         assert!(lock_result.is_err());
-        assert!(
-            lock_result
-                .err()
-                .ok_or("expected error")?
-                .contains("Timeout waiting for lockfile after")
-        );
+        let err = lock_result.err().ok_or("expected error")?;
+        assert!(err.contains("Timeout waiting for lockfile '"));
+        assert!(err.contains("test_lock_file_timeout.lock"));
         Ok(())
     }
 
@@ -1505,12 +1563,9 @@ mod lock_file {
     fn test_lock_file_error() -> Result<(), Box<dyn std::error::Error>> {
         let lock_result = lock_file(Path::new("/dev/fd"), Duration::from_secs(1));
         assert!(lock_result.is_err());
-        assert!(
-            lock_result
-                .err()
-                .ok_or("expected error")?
-                .contains("Is a directory")
-        );
+        let err = lock_result.err().ok_or("expected error")?;
+        assert!(err.contains("Failed to open lockfile '/dev/fd'"));
+        assert!(err.contains("Is a directory"));
         Ok(())
     }
 
