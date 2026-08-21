@@ -35,3 +35,16 @@ fn test_cli_run_command_failure() {
         .expect("failed to execute wrap-command");
     assert!(!status.success());
 }
+
+#[test]
+fn test_cli_run_command_not_found() {
+    let output = Command::new(env!("CARGO_BIN_EXE_wrap-command"))
+        .arg("nonexistent_command_12345")
+        .output()
+        .expect("failed to execute wrap-command");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(
+        "Error: Failed to execute 'nonexistent_command_12345': No such file or directory"
+    ));
+}

@@ -496,7 +496,9 @@ fn manage_child_process(args: &Args) -> Result<i32, String> {
     }
     child_command.process_group(0);
 
-    let mut child = child_command.spawn().map_err(|e| e.to_string())?;
+    let mut child = child_command
+        .spawn()
+        .map_err(|e| format!("Failed to execute '{}': {e}", args.command[0]))?;
 
     let timeout = args.command_timeout;
     let exit_status = match timeout {
@@ -1260,12 +1262,9 @@ mod run_command {
         let args = Args::parse_from(vec!["argv0", "command_that_does_not_exist"]);
         let result = run_command(&args);
         assert!(result.is_err());
-        assert!(
-            result
-                .err()
-                .ok_or("expected error")?
-                .contains("No such file or directory")
-        );
+        let err = result.err().ok_or("expected error")?;
+        assert!(err.contains("Failed to execute 'command_that_does_not_exist'"));
+        assert!(err.contains("No such file or directory"));
         Ok(())
     }
 
