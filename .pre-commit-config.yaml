@@ -109,20 +109,6 @@ repos:
       pass_filenames: false
       language: system
   # managed-by-populate-pre-commit end: pyrefly.yaml
-  # managed-by-populate-pre-commit start: pytest.yaml
-  - repo: local
-    hooks:
-    - id: pytest
-      name: Run `pytest`
-      language: system
-      pass_filenames: false
-      types:
-      - python
-      entry: pytest
-      args:
-      - -o
-      - pythonpath=.venv/lib/python3.14/site-packages
-  # managed-by-populate-pre-commit end: pytest.yaml
   # managed-by-populate-pre-commit start: python.yaml
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

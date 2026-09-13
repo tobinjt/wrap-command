@@ -8,10 +8,6 @@ import threading
 import time
 
 
-def test_interactive_in_pty_noop() -> None:
-    """No-op test so pytest discovers a test when running over the repository."""
-
-
 def run_child() -> None:
     import termios
 

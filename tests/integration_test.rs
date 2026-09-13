@@ -93,7 +93,10 @@ fn test_cli_run_command_short_verbose() {
 #[test]
 fn test_cli_interactive_in_pty() {
     let wrap_cmd = env!("CARGO_BIN_EXE_wrap-command");
-    let helper = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/pty_interactive_test.py");
+    let helper = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/pty_interactive_helper.py"
+    );
     let output = Command::new("python3")
         .arg(helper)
         .arg(wrap_cmd)
