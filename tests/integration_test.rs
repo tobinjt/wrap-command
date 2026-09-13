@@ -61,3 +61,31 @@ fn test_cli_run_command_directory_not_found() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Error: Working directory '/nonexistent_dir_12345' does not exist"));
 }
+
+#[test]
+fn test_cli_run_command_verbose() {
+    let output = Command::new(env!("CARGO_BIN_EXE_wrap-command"))
+        .arg("--verbose")
+        .arg("true")
+        .output()
+        .expect("failed to execute wrap-command");
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Executing command: 'true'"));
+    assert!(stderr.contains("Command exited with code 0"));
+    assert!(stderr.contains("Exiting with code 0"));
+}
+
+#[test]
+fn test_cli_run_command_short_verbose() {
+    let output = Command::new(env!("CARGO_BIN_EXE_wrap-command"))
+        .arg("-v")
+        .arg("true")
+        .output()
+        .expect("failed to execute wrap-command");
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Executing command: 'true'"));
+    assert!(stderr.contains("Command exited with code 0"));
+    assert!(stderr.contains("Exiting with code 0"));
+}

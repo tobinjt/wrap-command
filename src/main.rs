@@ -62,6 +62,7 @@ const LONG_ABOUT: &str = "A program that wraps a command, optionally:
   - waits for http://clients3.google.com/generate_204 to be reachable.
   - 0s means wait forever, otherwise timeout after that duration.
 - waiting for the user to press enter after the command has finished (--wait)
+- printing verbose progress messages (-v, --verbose)
 Any combination of unindented flags is supported.  The indented flags
 require the flag they are indented under.
 
@@ -75,6 +76,14 @@ Timeout / Duration Formats:
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about=LONG_ABOUT)]
 struct Args {
+    /// Enable verbose output.
+    #[arg(
+        short = 'v',
+        long = "verbose",
+        help_heading = "Execution & Environment"
+    )]
+    verbose: bool,
+
     /// The directory to run the command in. wrap-command itself doesn't change directory, it's just
     /// changed for the child process, so using --directory doesn't affect the location of the lock
     /// file. When retries are used the directory is changed for each new child process, so if the
@@ -222,6 +231,7 @@ struct Args {
 impl Default for Args {
     fn default() -> Self {
         Self {
+            verbose: false,
             directory: None,
             shell: false,
             tmux_window_name: None,
@@ -247,18 +257,38 @@ impl Default for Args {
     }
 }
 
-fn ping_url(url: &str, retry_count: u32, retry_delay: Duration) {
+fn ping_url(
+    url: &str,
+    retry_count: u32,
+    retry_delay: Duration,
+    verbose: bool,
+    err_writer: &mut dyn io::Write,
+) {
     let mut attempts = 0;
     loop {
         match ureq::get(url).call() {
-            Ok(_) => break,
+            Ok(_) => {
+                if verbose {
+                    let _ = writeln!(err_writer, "Successfully pinged webhook URL '{url}'");
+                }
+                break;
+            }
             Err(e) => {
                 if attempts >= retry_count {
-                    eprintln!(
+                    let _ = writeln!(
+                        err_writer,
                         "Failed to ping URL {} after {} retries: {}",
                         url, retry_count, e
                     );
                     break;
+                }
+                if verbose {
+                    let _ = writeln!(
+                        err_writer,
+                        "Failed to ping URL '{url}': {e}; retrying in {retry_delay:?} (attempt {} of {})...",
+                        attempts + 1,
+                        retry_count
+                    );
                 }
                 std::thread::sleep(retry_delay);
                 attempts += 1;
@@ -305,7 +335,7 @@ fn push_opt<T: std::fmt::Display>(vec: &mut Vec<String>, flag: &str, opt: Option
 }
 
 fn make_tmux_command(args: Args) -> Vec<String> {
-    let mut full_command = Vec::with_capacity(args.command.len() + 33);
+    let mut full_command = Vec::with_capacity(args.command.len() + 34);
     full_command.push("tmux".to_string());
     full_command.push("new-window".to_string());
     full_command.push("-d".to_string());
@@ -370,6 +400,9 @@ fn make_tmux_command(args: Args) -> Vec<String> {
     if args.wait {
         full_command.push("--wait".to_string());
     }
+    if args.verbose {
+        full_command.push("--verbose".to_string());
+    }
     push_opt(
         &mut full_command,
         "--network_check_timeout",
@@ -433,10 +466,26 @@ fn kill_child_process_group(
     }
 }
 
-fn acquire_lock(args: &Args) -> Result<Option<File>, String> {
+fn get_directory_str(dir: Option<&str>) -> String {
+    match dir {
+        Some(d) => d.to_string(),
+        None => env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| ".".to_string()),
+    }
+}
+
+fn acquire_lock(args: &Args, err_writer: &mut dyn io::Write) -> Result<Option<File>, String> {
     if let Some(lockfile_path) = &args.lockfile {
+        if args.verbose {
+            let _ = writeln!(err_writer, "Acquiring lock on '{lockfile_path}'...");
+        }
         let lock_timeout = args.lock_timeout.unwrap_or(Duration::ZERO);
-        Ok(Some(lock_file(Path::new(lockfile_path), lock_timeout)?))
+        let file = lock_file(Path::new(lockfile_path), lock_timeout)?;
+        if args.verbose {
+            let _ = writeln!(err_writer, "Lock acquired on '{lockfile_path}'");
+        }
+        Ok(Some(file))
     } else {
         Ok(None)
     }
@@ -444,18 +493,34 @@ fn acquire_lock(args: &Args) -> Result<Option<File>, String> {
 
 #[allow(dead_code)]
 fn run_command(args: &Args) -> Result<i32, String> {
-    run_command_impl(args, &mut io::stdin().lock(), &mut io::stdout())
+    run_command_impl(
+        args,
+        &mut io::stdin().lock(),
+        &mut io::stdout(),
+        &mut io::stderr(),
+    )
 }
 
 fn run_command_impl<R: io::BufRead, W: io::Write>(
     args: &Args,
     reader: &mut R,
     writer: &mut W,
+    err_writer: &mut dyn io::Write,
 ) -> Result<i32, String> {
-    let _lock_file = acquire_lock(args)?;
+    let _lock_file = acquire_lock(args, err_writer)?;
 
     if let Some(timeout) = args.network_check_timeout {
+        if args.verbose {
+            let _ = writeln!(
+                err_writer,
+                "Checking network connectivity using '{}'...",
+                args.network_check_url
+            );
+        }
         check_network_connectivity(&args.network_check_url, timeout)?;
+        if args.verbose {
+            let _ = writeln!(err_writer, "Network connectivity check succeeded");
+        }
     }
 
     let retries = args.retries.unwrap_or(0);
@@ -463,20 +528,49 @@ fn run_command_impl<R: io::BufRead, W: io::Write>(
 
     let mut attempt: u64 = 0;
     loop {
+        if args.verbose {
+            let cmd_str = args.command.join(" ");
+            let dir_str = get_directory_str(args.directory.as_deref());
+            let _ = writeln!(err_writer, "Executing command: '{cmd_str}' in '{dir_str}'");
+        }
         match manage_child_process(args) {
-            Ok(0) => return Ok(0),
+            Ok(0) => {
+                if args.verbose {
+                    let _ = writeln!(err_writer, "Command exited with code 0");
+                }
+                return Ok(0);
+            }
             res => {
+                if args.verbose {
+                    match &res {
+                        Ok(code) => {
+                            let _ = writeln!(err_writer, "Command exited with code {code}");
+                        }
+                        Err(e) => {
+                            let _ = writeln!(err_writer, "Command failed: {e}");
+                        }
+                    }
+                }
                 if retries != -1 && attempt >= retries as u64 {
+                    if args.verbose && retries > 0 {
+                        let _ = writeln!(err_writer, "Retries exhausted");
+                    }
                     return res;
+                }
+                attempt += 1;
+                if args.verbose {
+                    if retries == -1 {
+                        let _ = writeln!(err_writer, "Retrying command (attempt {attempt})...");
+                    } else {
+                        let _ = writeln!(
+                            err_writer,
+                            "Retrying command (attempt {attempt} of {retries})..."
+                        );
+                    }
                 }
                 if args.retry_wait {
                     let cmd_str = args.command.join(" ");
-                    let dir_str = match &args.directory {
-                        Some(d) => d.clone(),
-                        None => env::current_dir()
-                            .map(|p| p.display().to_string())
-                            .unwrap_or_else(|_| ".".to_string()),
-                    };
+                    let dir_str = get_directory_str(args.directory.as_deref());
                     let _ = writeln!(
                         writer,
                         "Press Enter to retry running '{cmd_str}' in '{dir_str}'..."
@@ -484,9 +578,11 @@ fn run_command_impl<R: io::BufRead, W: io::Write>(
                     let mut _input = String::new();
                     let _ = reader.read_line(&mut _input);
                 } else {
+                    if args.verbose && !delay.is_zero() {
+                        let _ = writeln!(err_writer, "Waiting {delay:?} before retrying...");
+                    }
                     std::thread::sleep(delay);
                 }
-                attempt += 1;
             }
         }
     }
@@ -551,8 +647,10 @@ fn manage_child_process(args: &Args) -> Result<i32, String> {
 
 fn make_command_to_run(args: Args) -> Args {
     if args.tmux_window_name.is_some() {
+        let verbose = args.verbose;
         Args {
             command: make_tmux_command(args),
+            verbose,
             ..Default::default()
         }
     } else {
@@ -575,20 +673,30 @@ fn make_command_to_run(args: Args) -> Args {
 }
 
 fn realmain(args: Args) -> i32 {
-    realmain_impl(args, &mut io::stdin().lock(), &mut io::stdout())
+    realmain_impl(
+        args,
+        &mut io::stdin().lock(),
+        &mut io::stdout(),
+        &mut io::stderr(),
+    )
 }
 
-fn realmain_impl<R: io::BufRead, W: io::Write>(args: Args, reader: &mut R, writer: &mut W) -> i32 {
+fn realmain_impl<R: io::BufRead, W: io::Write>(
+    args: Args,
+    reader: &mut R,
+    writer: &mut W,
+    err_writer: &mut dyn io::Write,
+) -> i32 {
     if let Some(shell) = args.output_shell_completion {
         generate(shell, &mut Args::command(), "wrap-command", writer);
         return 0;
     }
     let args_for_command = make_command_to_run(args);
 
-    let exit_code = match run_command_impl(&args_for_command, reader, writer) {
+    let exit_code = match run_command_impl(&args_for_command, reader, writer, err_writer) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("Error: {}", e);
+            let _ = writeln!(err_writer, "Error: {e}");
             1
         }
     };
@@ -600,10 +708,15 @@ fn realmain_impl<R: io::BufRead, W: io::Write>(args: Args, reader: &mut R, write
     };
 
     if let Some(url) = url {
+        if args_for_command.verbose {
+            let _ = writeln!(err_writer, "Pinging webhook URL '{url}'...");
+        }
         ping_url(
             url,
             args_for_command.url_retry_count,
             args_for_command.url_retry_delay,
+            args_for_command.verbose,
+            err_writer,
         );
     }
 
@@ -611,6 +724,10 @@ fn realmain_impl<R: io::BufRead, W: io::Write>(args: Args, reader: &mut R, write
         let _ = writeln!(writer, "Press Enter to continue...");
         let mut _input = String::new();
         let _ = reader.read_line(&mut _input);
+    }
+
+    if args_for_command.verbose {
+        let _ = writeln!(err_writer, "Exiting with code {exit_code}");
     }
 
     exit_code
@@ -862,6 +979,34 @@ mod make_tmux_command {
         );
         Ok(())
     }
+
+    #[test]
+    fn test_make_tmux_command_verbose() -> Result<(), Box<dyn std::error::Error>> {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name=window",
+            "--verbose",
+            "echo",
+            "hello",
+        ]);
+        let result = make_tmux_command(args);
+        let current_exe = env::current_exe()?.display().to_string();
+        assert_eq!(
+            result,
+            vec![
+                "tmux",
+                "new-window",
+                "-d",
+                "-n",
+                "window",
+                &current_exe,
+                "--verbose",
+                "echo",
+                "hello"
+            ]
+        );
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1001,7 +1146,7 @@ mod ping_tests {
             .create();
         let url = format!("{}/success_first", server.url());
 
-        ping_url(&url, 2, Duration::ZERO);
+        ping_url(&url, 2, Duration::ZERO, false, &mut io::sink());
 
         expected_request.assert();
         Ok(())
@@ -1018,7 +1163,7 @@ mod ping_tests {
             .create();
         let url = format!("{}/exhausts", server.url());
 
-        ping_url(&url, 2, Duration::ZERO);
+        ping_url(&url, 2, Duration::ZERO, false, &mut io::sink());
 
         expected_request.assert();
         Ok(())
@@ -1045,7 +1190,50 @@ mod ping_tests {
             }
         });
 
-        ping_url(&url, 2, Duration::from_millis(1));
+        ping_url(&url, 2, Duration::from_millis(1), false, &mut io::sink());
+        Ok(())
+    }
+
+    #[test]
+    fn test_ping_url_verbose_success() -> Result<(), Box<dyn std::error::Error>> {
+        let mut server = Server::new();
+        let expected_request = server
+            .mock("GET", "/verbose_success")
+            .with_status(200)
+            .expect(1)
+            .create();
+        let url = format!("{}/verbose_success", server.url());
+        let mut err_buf = Vec::new();
+
+        ping_url(&url, 2, Duration::ZERO, true, &mut err_buf);
+
+        expected_request.assert();
+        let output = String::from_utf8(err_buf)?;
+        assert!(output.contains(&format!("Successfully pinged webhook URL '{url}'")));
+        Ok(())
+    }
+
+    #[test]
+    fn test_ping_url_verbose_retry_and_exhaust() -> Result<(), Box<dyn std::error::Error>> {
+        let mut server = Server::new();
+        let expected_request = server
+            .mock("GET", "/verbose_retry")
+            .with_status(500)
+            .expect(2)
+            .create();
+        let url = format!("{}/verbose_retry", server.url());
+        let mut err_buf = Vec::new();
+
+        ping_url(&url, 1, Duration::ZERO, true, &mut err_buf);
+
+        expected_request.assert();
+        let output = String::from_utf8(err_buf)?;
+        assert!(output.contains(&format!("Failed to ping URL '{url}'")));
+        assert!(output.contains(&format!(
+            "retrying in {:?} (attempt 1 of 1)...",
+            Duration::ZERO
+        )));
+        assert!(output.contains(&format!("Failed to ping URL {url} after 1 retries:")));
         Ok(())
     }
 }
@@ -1053,6 +1241,7 @@ mod ping_tests {
 #[cfg(test)]
 mod realmain {
     use super::*;
+    use mockito::Server;
     use tempfile::NamedTempFile;
 
     #[test]
@@ -1161,11 +1350,13 @@ mod realmain {
     #[test]
     fn test_realmain_output_shell_completion() -> Result<(), Box<dyn std::error::Error>> {
         let mut buffer = Vec::new();
+        let mut err_buffer = Vec::new();
         let mut reader = std::io::Cursor::new(Vec::new());
         let result = realmain_impl(
             Args::parse_from(vec!["argv0", "--output_shell_completion", "bash"]),
             &mut reader,
             &mut buffer,
+            &mut err_buffer,
         );
         assert_eq!(result, 0);
         let output = String::from_utf8(buffer)?;
@@ -1184,6 +1375,7 @@ mod realmain {
             Args::parse_from(vec!["argv0", "--wait", "echo", "foo"]),
             &mut reader,
             &mut buffer,
+            &mut io::sink(),
         );
         assert_eq!(result, 0);
         let output = String::from_utf8(buffer)?;
@@ -1191,11 +1383,37 @@ mod realmain {
         assert_eq!(reader.position(), 1);
         Ok(())
     }
+
+    #[test]
+    fn test_realmain_verbose_success_and_webhook() -> Result<(), Box<dyn std::error::Error>> {
+        let mut server = Server::new();
+        let expected_request = server.mock("GET", "/success").with_status(200).create();
+        let url = format!("{}/success", server.url());
+
+        let mut buffer = Vec::new();
+        let mut err_buffer = Vec::new();
+        let mut reader = std::io::Cursor::new(Vec::new());
+
+        let args = Args::parse_from(vec!["argv0", "--verbose", "--success_url", &url, "true"]);
+        let result = realmain_impl(args, &mut reader, &mut buffer, &mut err_buffer);
+
+        assert_eq!(result, 0);
+        expected_request.assert();
+
+        let err_output = String::from_utf8(err_buffer)?;
+        assert!(err_output.contains("Executing command: 'true'"));
+        assert!(err_output.contains("Command exited with code 0"));
+        assert!(err_output.contains(&format!("Pinging webhook URL '{url}'...")));
+        assert!(err_output.contains(&format!("Successfully pinged webhook URL '{url}'")));
+        assert!(err_output.contains("Exiting with code 0"));
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod run_command {
     use super::*;
+    use mockito::Server;
     use tempfile::NamedTempFile;
 
     #[test]
@@ -1426,7 +1644,7 @@ mod run_command {
         let args = Args::parse_from(vec!["argv0", "--retries=2", "--retry_wait", "false"]);
         let mut buffer = Vec::new();
         let mut reader = std::io::Cursor::new(b"\n\n");
-        let result = run_command_impl(&args, &mut reader, &mut buffer);
+        let result = run_command_impl(&args, &mut reader, &mut buffer, &mut io::sink());
 
         assert_eq!(result?, 1);
         let output = String::from_utf8(buffer)?;
@@ -1449,7 +1667,7 @@ mod run_command {
         ]);
         let mut buffer = Vec::new();
         let mut reader = std::io::Cursor::new(b"\n");
-        let result = run_command_impl(&args, &mut reader, &mut buffer);
+        let result = run_command_impl(&args, &mut reader, &mut buffer, &mut io::sink());
 
         assert_eq!(result?, 1);
         let output = String::from_utf8(buffer)?;
@@ -1530,6 +1748,119 @@ mod run_command {
 
         let count: u32 = std::fs::read_to_string(&counter_file)?.trim().parse()?;
         assert_eq!(count, 4);
+        Ok(())
+    }
+
+    #[test]
+    fn test_run_command_verbose_lock_and_network() -> Result<(), Box<dyn std::error::Error>> {
+        let mut server = Server::new();
+        let _m = server.mock("HEAD", "/").with_status(200).create();
+        let url = server.url();
+
+        let temp_file = NamedTempFile::new()?;
+        let lock_path = temp_file.path().to_str().ok_or("invalid path")?;
+
+        let args = Args::parse_from(vec![
+            "argv0",
+            "-v",
+            "--lockfile",
+            lock_path,
+            "--directory=/tmp",
+            "--network_check_timeout=1s",
+            "--network_check_url",
+            &url,
+            "true",
+        ]);
+
+        let mut reader = std::io::Cursor::new(Vec::new());
+        let mut writer = Vec::new();
+        let mut err_writer = Vec::new();
+
+        let result = run_command_impl(&args, &mut reader, &mut writer, &mut err_writer);
+        assert_eq!(result?, 0);
+
+        let err_output = String::from_utf8(err_writer)?;
+        assert!(err_output.contains(&format!("Acquiring lock on '{lock_path}'...")));
+        assert!(err_output.contains(&format!("Lock acquired on '{lock_path}'")));
+        assert!(err_output.contains(&format!("Checking network connectivity using '{url}'...")));
+        assert!(err_output.contains("Network connectivity check succeeded"));
+        assert!(err_output.contains("Executing command: 'true' in '/tmp'"));
+        assert!(err_output.contains("Command exited with code 0"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_run_command_verbose_retry_exhausted() -> Result<(), Box<dyn std::error::Error>> {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--verbose",
+            "--retries=2",
+            "--retry_delay=1ms",
+            "false",
+        ]);
+        let mut reader = std::io::Cursor::new(Vec::new());
+        let mut writer = Vec::new();
+        let mut err_writer = Vec::new();
+
+        let result = run_command_impl(&args, &mut reader, &mut writer, &mut err_writer);
+        assert_eq!(result?, 1);
+
+        let err_output = String::from_utf8(err_writer)?;
+        assert!(err_output.contains("Executing command: 'false'"));
+        assert!(err_output.contains("Command exited with code 1"));
+        assert!(err_output.contains("Retrying command (attempt 1 of 2)..."));
+        assert!(err_output.contains("Waiting 1ms before retrying..."));
+        assert!(err_output.contains("Retrying command (attempt 2 of 2)..."));
+        assert!(err_output.contains("Retries exhausted"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_run_command_verbose_retry_unlimited() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        let counter_file = temp_dir.path().join("counter");
+        std::fs::write(&counter_file, "0")?;
+        let counter_path_str = counter_file.to_str().ok_or("invalid path")?;
+
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--verbose",
+            "--retries=-1",
+            "--retry_delay=1ms",
+            "sh",
+            "-c",
+            &format!(
+                "val=$(cat {counter_path_str}); echo $((val+1)) > {counter_path_str}; if [ $val -lt 2 ]; then exit 1; else exit 0; fi"
+            ),
+        ]);
+
+        let mut reader = std::io::Cursor::new(Vec::new());
+        let mut writer = Vec::new();
+        let mut err_writer = Vec::new();
+
+        let result = run_command_impl(&args, &mut reader, &mut writer, &mut err_writer);
+        assert_eq!(result?, 0);
+
+        let err_output = String::from_utf8(err_writer)?;
+        assert!(err_output.contains("Retrying command (attempt 1)..."));
+        assert!(err_output.contains("Retrying command (attempt 2)..."));
+        assert!(err_output.contains("Command exited with code 0"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_run_command_verbose_command_failure() -> Result<(), Box<dyn std::error::Error>> {
+        let args = Args::parse_from(vec!["argv0", "--verbose", "nonexistent_command_xyz"]);
+        let mut reader = std::io::Cursor::new(Vec::new());
+        let mut writer = Vec::new();
+        let mut err_writer = Vec::new();
+
+        let result = run_command_impl(&args, &mut reader, &mut writer, &mut err_writer);
+        assert!(result.is_err());
+
+        let err_output = String::from_utf8(err_writer)?;
+        assert!(err_output.contains("Executing command: 'nonexistent_command_xyz'"));
+        assert!(err_output.contains("Command failed:"));
         Ok(())
     }
 }
@@ -1642,6 +1973,7 @@ mod make_command_to_run {
         assert!(result_args.retries.is_none());
         assert!(result_args.retry_delay.is_none());
         assert!(!result_args.retry_wait);
+        assert!(!result_args.verbose);
         Ok(())
     }
 
@@ -1800,6 +2132,22 @@ mod make_command_to_run {
         assert_eq!(result_args.shell, original_args.shell);
         assert_eq!(result_args.signal_timeout, original_args.signal_timeout);
         assert_eq!(result_args.caffeinate, original_args.caffeinate);
+        assert_eq!(result_args.verbose, original_args.verbose);
+        Ok(())
+    }
+
+    #[test]
+    fn test_make_command_to_run_tmux_verbose() -> Result<(), Box<dyn std::error::Error>> {
+        let args = Args::parse_from(vec![
+            "argv0",
+            "--tmux_window_name=my_window",
+            "--verbose",
+            "echo",
+            "hello",
+        ]);
+        let result_args = make_command_to_run(args);
+        assert!(result_args.verbose);
+        assert!(result_args.command.contains(&"--verbose".to_string()));
         Ok(())
     }
 
@@ -1854,6 +2202,7 @@ mod clap_test {
         let args = Args::parse_from(vec!["argv0", "echo"]);
         assert_eq!(vec!["echo".to_string()], args.command);
         assert!(!args.shell);
+        assert!(!args.verbose);
         assert_eq!(Duration::from_secs(1), args.url_retry_delay);
         assert_eq!(5, args.url_retry_count);
 
@@ -2082,7 +2431,17 @@ mod clap_test {
             "http://clients3.google.com/generate_204"
         );
         assert!(default_args.output_shell_completion.is_none());
+        assert!(!default_args.verbose);
         assert!(default_args.command.is_empty());
+    }
+
+    #[test]
+    fn test_parse_verbose() {
+        let args = Args::parse_from(vec!["argv0", "-v", "echo"]);
+        assert!(args.verbose);
+
+        let args = Args::parse_from(vec!["argv0", "--verbose", "echo"]);
+        assert!(args.verbose);
     }
 }
 

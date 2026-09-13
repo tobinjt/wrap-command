@@ -187,6 +187,10 @@ wrap-command --network_check_timeout 1m -- sudo apt-get update
     wrap-command <reconstructed_flags> <target_command>
   ```
 
+- `-v`, `--verbose`: Enable verbose logging to stderr for key lifecycle events
+  (lock acquisition, network checks, command execution, retries, exit status,
+  and webhook pings).
+
 - `--wait`: Wait for the user to press Enter after the command has finished
   (great for inspecting output before closing a terminal window).
 
