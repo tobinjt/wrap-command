@@ -13,6 +13,26 @@ repos:
       exclude: dependabot.yml|.*.yaml$
       entry: actionlint
   # managed-by-populate-pre-commit end: actionlint.yaml
+  # managed-by-populate-pre-commit start: basedpyright.yaml
+  - repo: local
+    hooks:
+    - id: basedpyright
+      name: Run `basedpyright`
+      language: system
+      types:
+      - python
+      entry: basedpyright
+  # managed-by-populate-pre-commit end: basedpyright.yaml
+  # managed-by-populate-pre-commit start: black.yaml
+  - repo: local
+    hooks:
+    - id: black
+      name: Run `black`
+      language: system
+      types:
+      - python
+      entry: black
+  # managed-by-populate-pre-commit end: black.yaml
   # managed-by-populate-pre-commit start: conventional-pre-commit.yaml
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.4.0
@@ -59,6 +79,56 @@ repos:
     hooks:
     - id: check-hooks-apply
   # managed-by-populate-pre-commit end: meta.yaml
+  # managed-by-populate-pre-commit start: mypy.yaml
+  - repo: local
+    hooks:
+    - id: mypy
+      name: Run `mypy`
+      language: system
+      types:
+      - python
+      entry: mypy --ignore-missing-imports --scripts-are-modules
+  # managed-by-populate-pre-commit end: mypy.yaml
+  # managed-by-populate-pre-commit start: pygrep-hooks.yaml
+  - repo: https://github.com/pre-commit/pygrep-hooks
+    rev: v1.10.0
+    hooks:
+    - id: python-check-blanket-noqa
+    - id: python-check-blanket-type-ignore
+    - id: python-check-mock-methods
+    - id: python-no-eval
+    - id: python-no-log-warn
+    - id: python-use-type-annotations
+  # managed-by-populate-pre-commit end: pygrep-hooks.yaml
+  # managed-by-populate-pre-commit start: pyrefly.yaml
+  - repo: https://github.com/facebook/pyrefly-pre-commit
+    rev: 1.2.0
+    hooks:
+    - id: pyrefly-check
+      name: Pyrefly (type checking)
+      pass_filenames: false
+      language: system
+  # managed-by-populate-pre-commit end: pyrefly.yaml
+  # managed-by-populate-pre-commit start: pytest.yaml
+  - repo: local
+    hooks:
+    - id: pytest
+      name: Run `pytest`
+      language: system
+      pass_filenames: false
+      types:
+      - python
+      entry: pytest
+      args:
+      - -o
+      - pythonpath=.venv/lib/python3.14/site-packages
+  # managed-by-populate-pre-commit end: pytest.yaml
+  # managed-by-populate-pre-commit start: python.yaml
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+    - id: debug-statements
+  # managed-by-populate-pre-commit end: python.yaml
   # managed-by-populate-pre-commit start: readme-toc.yaml
   - repo: https://github.com/thlorenz/doctoc
     rev: v2.5.0

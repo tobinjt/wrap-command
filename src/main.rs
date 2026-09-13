@@ -1,11 +1,11 @@
 use clap::{CommandFactory, Parser};
 use clap_complete::{Shell, generate};
 use fs4::FileExt;
-use nix::sys::signal::killpg;
-use nix::unistd::Pid;
+use nix::sys::signal::{SigHandler, Signal, killpg, signal};
+use nix::unistd::{Pid, getpgrp, tcgetpgrp, tcsetpgrp};
 use std::env;
 use std::fs::{File, OpenOptions};
-use std::io;
+use std::io::{self, IsTerminal};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
@@ -588,6 +588,58 @@ fn run_command_impl<R: io::BufRead, W: io::Write>(
     }
 }
 
+struct TerminalForegroundGuard {
+    parent_pgid: Pid,
+    prev_sigttou: SigHandler,
+}
+
+impl TerminalForegroundGuard {
+    /// If stdin is a terminal and wrap-command is currently in the foreground,
+    /// prepares terminal handover for the child and returns a guard that will
+    /// restore the terminal to wrap-command when dropped.
+    fn new() -> Option<Self> {
+        if !io::stdin().is_terminal() {
+            return None;
+        }
+        let parent_pgid = getpgrp();
+        match tcgetpgrp(io::stdin()) {
+            Ok(pgrp) if pgrp == parent_pgid => {}
+            _ => return None,
+        }
+        // Ignore SIGTTOU so tcsetpgrp does not stop the parent process
+        // when called from background.
+        let prev_sigttou = unsafe { signal(Signal::SIGTTOU, SigHandler::SigIgn) }.ok()?;
+        Some(Self {
+            parent_pgid,
+            prev_sigttou,
+        })
+    }
+
+    /// Hands over the terminal foreground to the child process group.
+    fn handover_to(&self, child_pgid: Pid) {
+        let _ = tcsetpgrp(io::stdin(), child_pgid);
+    }
+
+    #[cfg(test)]
+    fn mock_new(parent_pgid: Pid, prev_sigttou: SigHandler) -> Self {
+        Self {
+            parent_pgid,
+            prev_sigttou,
+        }
+    }
+}
+
+impl Drop for TerminalForegroundGuard {
+    fn drop(&mut self) {
+        // Restore terminal foreground to parent
+        let _ = tcsetpgrp(io::stdin(), self.parent_pgid);
+        // Restore SIGTTOU handler
+        unsafe {
+            let _ = signal(Signal::SIGTTOU, self.prev_sigttou);
+        }
+    }
+}
+
 fn manage_child_process(args: &Args) -> Result<i32, String> {
     let mut child_command = Command::new(&args.command[0]);
     child_command.args(&args.command[1..]);
@@ -603,9 +655,15 @@ fn manage_child_process(args: &Args) -> Result<i32, String> {
     }
     child_command.process_group(0);
 
+    let terminal_guard = TerminalForegroundGuard::new();
+
     let mut child = child_command
         .spawn()
         .map_err(|e| format!("Failed to execute '{}': {e}", args.command[0]))?;
+
+    if let Some(guard) = &terminal_guard {
+        guard.handover_to(Pid::from_raw(child.id() as i32));
+    }
 
     let timeout = args.command_timeout;
     let exit_status = match timeout {
@@ -2507,5 +2565,52 @@ mod duration_parsing_tests {
             "Lockfile permissions should be 0o600, but were 0o{:o}",
             mode & 0o777
         );
+    }
+}
+
+#[cfg(test)]
+mod terminal_guard_tests {
+    use super::*;
+    use nix::pty::openpty;
+    use nix::sys::wait::{WaitStatus, waitpid};
+    use nix::unistd::{ForkResult, fork};
+    use std::os::fd::AsRawFd;
+
+    #[test]
+    fn test_terminal_foreground_guard_not_a_terminal() {
+        assert!(TerminalForegroundGuard::new().is_none());
+        let guard = TerminalForegroundGuard::mock_new(getpgrp(), SigHandler::SigDfl);
+        guard.handover_to(getpgrp());
+        drop(guard);
+    }
+
+    #[test]
+    fn test_manage_child_process_in_pty() {
+        let pty = openpty(None, None).expect("failed to openpty");
+        match unsafe { fork() }.expect("failed to fork") {
+            ForkResult::Child => {
+                let _ = nix::unistd::setsid();
+                unsafe {
+                    #[cfg(target_os = "macos")]
+                    let tiocsctty: nix::libc::c_ulong = 0x20007461;
+                    #[cfg(not(target_os = "macos"))]
+                    let tiocsctty = nix::libc::TIOCSCTTY;
+                    nix::libc::ioctl(pty.slave.as_raw_fd(), tiocsctty, 0);
+                    nix::libc::dup2(pty.slave.as_raw_fd(), nix::libc::STDIN_FILENO);
+                    nix::libc::dup2(pty.slave.as_raw_fd(), nix::libc::STDOUT_FILENO);
+                    nix::libc::dup2(pty.slave.as_raw_fd(), nix::libc::STDERR_FILENO);
+                }
+                let _ = tcsetpgrp(io::stdin(), getpgrp());
+                let args = Args::parse_from(vec!["argv0", "true"]);
+                let exit_code = manage_child_process(&args).unwrap_or(1);
+                std::process::exit(exit_code);
+            }
+            ForkResult::Parent { child } => {
+                match waitpid(child, None).expect("failed to waitpid") {
+                    WaitStatus::Exited(_, code) => assert_eq!(code, 0),
+                    other => panic!("Child did not exit cleanly: {other:?}"),
+                }
+            }
+        }
     }
 }
